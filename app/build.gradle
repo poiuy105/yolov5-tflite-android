@@ -30,7 +30,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    namespace 'com.crowdhuman.detector'
+    namespace 'com.example.yolov5tfliteandroid'
 }
 
 dependencies {
