@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.util.Log;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -204,9 +206,12 @@ public class FullScreenAnalyse implements ImageAnalysis.Analyzer {
                 .subscribe(
                         (Result result) -> {
                             if (result.bitmap != null) {
-                                Bitmap prev = (Bitmap) boxLabelCanvas.getDrawable();
-                                if (prev != null && !prev.isRecycled()) {
-                                    prev.recycle();
+                                Drawable prevDrawable = boxLabelCanvas.getDrawable();
+                                if (prevDrawable instanceof BitmapDrawable) {
+                                    Bitmap prev = ((BitmapDrawable) prevDrawable).getBitmap();
+                                    if (prev != null && !prev.isRecycled()) {
+                                        prev.recycle();
+                                    }
                                 }
                                 boxLabelCanvas.setImageBitmap(result.bitmap);
                             }
