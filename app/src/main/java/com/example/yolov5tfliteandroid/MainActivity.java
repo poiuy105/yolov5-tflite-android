@@ -1,21 +1,13 @@
 package com.example.yolov5tfliteandroid;
 
 import android.Manifest;
-import android.content.ContentValues;
-import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.os.Build;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.MediaStore;
-import android.util.Log;
-import android.view.Surface;
-import android.view.View;
-import android.view.WindowManager;
 import android.widget.AdapterView;
-import android.widget.CompoundButton;
 import android.widget.ImageView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -26,17 +18,21 @@ import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.example.yolov5tfliteandroid.analysis.AnalyseCallback;
+import com.example.yolov5tfliteandroid.analysis.AnalyseResult;
 import com.example.yolov5tfliteandroid.analysis.FullImageAnalyse;
+import com.example.yolov5tfliteandroid.detector.DetectorCallback;
 import com.example.yolov5tfliteandroid.detector.Yolov5TFLiteDetector;
 import com.example.yolov5tfliteandroid.utils.CameraProcess;
-
-import java.io.OutputStream;
+import com.example.yolov5tfliteandroid.utils.DisplayUtils;
+import com.example.yolov5tfliteandroid.utils.ScreenshotUtils;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
+    private static final String DEFAULT_MODEL = "crowdhuman";
 
-    private boolean IS_FULL_SCREEN = false;
+    private boolean isFullScreen = false;
     private boolean isSpinnerInitialized = false;
     private FullImageAnalyse currentAnalyser;
 
@@ -50,70 +46,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView detectCountTextView;
     private ImageView cameraSwitchButton;
     private ImageView screenshotButton;
-    private Yolov5TFLiteDetector yolov5TFLiteDetector;
-    private CameraProcess cameraProcess = new CameraProcess();
-
-    protected int getScreenOrientation() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return getWindowManager().getDefaultDisplay().getRotation();
-        }
-        WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        @SuppressWarnings("deprecation")
-        int rotation = wm.getDefaultDisplay().getRotation();
-        switch (rotation) {
-            case Surface.ROTATION_270: return 270;
-            case Surface.ROTATION_180: return 180;
-            case Surface.ROTATION_90: return 90;
-            default: return 0;
-        }
-    }
-
-    private void initModel(String modelName) {
-        try {
-            this.yolov5TFLiteDetector = new Yolov5TFLiteDetector();
-            this.yolov5TFLiteDetector.setModelFile(modelName);
-            this.yolov5TFLiteDetector.initialModel(this);
-            Log.i("model", "Success loading model: " + this.yolov5TFLiteDetector.getModelFile());
-        } catch (Exception e) {
-            Log.e("MainActivity", "load model error: " + e.getMessage(), e);
-            Toast.makeText(this, "Failed to load model: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void startCameraWithCurrentMode() {
-        if (yolov5TFLiteDetector == null) {
-            Log.e("MainActivity", "Detector is null, cannot start camera");
-            Toast.makeText(this, "Model not loaded. Please restart the app.", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        // Dispose previous analyser
-        if (currentAnalyser != null) {
-            currentAnalyser.dispose();
-        }
-
-        int rotation = getScreenOrientation();
-        currentAnalyser = new FullImageAnalyse(
-                MainActivity.this,
-                cameraPreviewMatch,
-                boxLabelCanvas,
-                rotation,
-                inferenceTimeTextView,
-                frameSizeTextView,
-                detectCountTextView,
-                yolov5TFLiteDetector,
-                IS_FULL_SCREEN);
-
-        if (IS_FULL_SCREEN) {
-            cameraPreviewWrap.removeAllViews();
-            cameraProcess.startCamera(MainActivity.this, currentAnalyser, cameraPreviewMatch,
-                    (msg) -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show());
-        } else {
-            cameraPreviewMatch.removeAllViews();
-            cameraProcess.startCamera(MainActivity.this, currentAnalyser, cameraPreviewWrap,
-                    (msg) -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show());
-        }
-    }
+    private Yolov5TFLiteDetector detector;
+    private final CameraProcess cameraProcess = new CameraProcess();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
 
+        // Bind views
         cameraPreviewMatch = findViewById(R.id.camera_preview_match);
         cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FILL_START);
         cameraPreviewWrap = findViewById(R.id.camera_preview_wrap);
@@ -136,84 +71,112 @@ public class MainActivity extends AppCompatActivity {
         cameraSwitchButton = findViewById(R.id.camera_switch);
         screenshotButton = findViewById(R.id.screenshot);
 
-        int rotation = getScreenOrientation();
-        Log.i("image", "rotation: " + rotation);
-
         // Load default model
-        initModel("crowdhuman");
+        initModel(DEFAULT_MODEL);
 
         // Model switch
         modelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
-            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                if (!isSpinnerInitialized) {
-                    isSpinnerInitialized = true;
-                    return;
-                }
-                String model = (String) adapterView.getItemAtPosition(i);
-                Toast.makeText(MainActivity.this, "Loading model: " + model, Toast.LENGTH_SHORT).show();
+            public void onItemSelected(AdapterView<?> parent, View view, int i, long id) {
+                if (!isSpinnerInitialized) { isSpinnerInitialized = true; return; }
+                String model = (String) parent.getItemAtPosition(i);
+                Toast.makeText(MainActivity.this, "Loading: " + model, Toast.LENGTH_SHORT).show();
                 initModel(model);
                 startCameraWithCurrentMode();
             }
-            @Override
-            public void onNothingSelected(AdapterView<?> adapterView) {}
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
 
         // Full-screen toggle
-        immersiveSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            IS_FULL_SCREEN = isChecked;
+        immersiveSwitch.setOnCheckedChangeListener((btn, checked) -> {
+            isFullScreen = checked;
             startCameraWithCurrentMode();
         });
 
-        // Camera switch (front/back)
+        // Camera switch
         cameraSwitchButton.setOnClickListener(v -> {
             cameraProcess.setFrontCamera(!cameraProcess.isFrontCamera());
             startCameraWithCurrentMode();
-            Toast.makeText(this,
-                    cameraProcess.isFrontCamera() ? "Front camera" : "Back camera",
-                    Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, cameraProcess.isFrontCamera() ? "Front camera" : "Back camera", Toast.LENGTH_SHORT).show();
         });
 
         // Screenshot
         screenshotButton.setOnClickListener(v -> {
-            if (currentAnalyser != null) {
-                currentAnalyser.setScreenshotListener((bitmap) -> {
-                    saveBitmapToGallery(bitmap);
-                });
-                currentAnalyser.takeScreenshot();
+            Drawable d = boxLabelCanvas.getDrawable();
+            if (d instanceof BitmapDrawable) {
+                Bitmap bmp = ((BitmapDrawable) d).getBitmap();
+                if (bmp != null && !bmp.isRecycled()) {
+                    ScreenshotUtils.saveToGallery(this, bmp.copy(Bitmap.Config.ARGB_8888, false),
+                            new ScreenshotUtils.SaveCallback() {
+                                @Override public void onSuccess() { Toast.makeText(MainActivity.this, "Screenshot saved", Toast.LENGTH_SHORT).show(); }
+                                @Override public void onError(String msg) { Toast.makeText(MainActivity.this, "Save failed: " + msg, Toast.LENGTH_SHORT).show(); }
+                            });
+                }
             }
         });
 
-        // Request camera permission
+        // Permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCameraWithCurrentMode();
         } else {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.CAMERA},
-                    CAMERA_PERMISSION_REQUEST_CODE);
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST_CODE);
         }
     }
 
-    private void saveBitmapToGallery(Bitmap bitmap) {
-        try {
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, "detection_" + System.currentTimeMillis() + ".png");
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CrowdHuman");
+    private void initModel(String modelKey) {
+        detector = new Yolov5TFLiteDetector();
+        boolean valid = detector.setModelFile(modelKey);
+        if (!valid) {
+            Toast.makeText(this, "Unknown model: " + modelKey, Toast.LENGTH_LONG).show();
+            return;
+        }
+        detector.initialModel(this, new DetectorCallback() {
+            @Override public void onModelLoaded(String file) {
+                Log.i("MainActivity", "Model loaded: " + file);
             }
-            android.net.Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-            if (uri != null) {
-                try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                    if (out != null) {
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-                        Toast.makeText(this, "Screenshot saved", Toast.LENGTH_SHORT).show();
+            @Override public void onModelError(String msg) {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void startCameraWithCurrentMode() {
+        if (detector == null || detector.getModelFile() == null) {
+            Toast.makeText(this, "Model not loaded. Please restart.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (currentAnalyser != null) currentAnalyser.dispose();
+
+        int rotation = DisplayUtils.getScreenOrientation(this);
+        currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation, detector, isFullScreen);
+        currentAnalyser.setCallback(new AnalyseCallback() {
+            @Override
+            public void onResult(AnalyseResult result) {
+                if (result.resultBitmap != null) {
+                    Drawable prev = boxLabelCanvas.getDrawable();
+                    if (prev instanceof BitmapDrawable) {
+                        Bitmap prevBmp = ((BitmapDrawable) prev).getBitmap();
+                        if (prevBmp != null && !prevBmp.isRecycled()) prevBmp.recycle();
                     }
+                    boxLabelCanvas.setImageBitmap(result.resultBitmap);
                 }
+                frameSizeTextView.setText(result.frameHeight + "x" + result.frameWidth);
+                inferenceTimeTextView.setText(result.costTimeMs + "ms");
+                detectCountTextView.setText(String.valueOf(result.detectCount));
             }
-        } catch (Exception e) {
-            Log.e("MainActivity", "Failed to save screenshot: " + e.getMessage(), e);
-            Toast.makeText(this, "Failed to save screenshot", Toast.LENGTH_SHORT).show();
+            @Override
+            public void onError(String message) {
+                Log.e("MainActivity", "Analyse error: " + message);
+            }
+        });
+
+        CameraProcess.CameraErrorCallback errCb = msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        if (isFullScreen) {
+            cameraPreviewWrap.removeAllViews();
+            cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
+        } else {
+            cameraPreviewMatch.removeAllViews();
+            cameraProcess.startCamera(this, currentAnalyser, cameraPreviewWrap, errCb);
         }
     }
 
@@ -225,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Camera permission granted", Toast.LENGTH_SHORT).show();
                 startCameraWithCurrentMode();
             } else {
-                Toast.makeText(this, "Camera permission denied. App cannot function without camera.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Camera permission denied.", Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -233,13 +196,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (currentAnalyser != null) {
-            currentAnalyser.dispose();
-            currentAnalyser = null;
-        }
-        if (yolov5TFLiteDetector != null) {
-            yolov5TFLiteDetector.close();
-            yolov5TFLiteDetector = null;
-        }
+        if (currentAnalyser != null) { currentAnalyser.dispose(); currentAnalyser = null; }
+        if (detector != null) { detector.close(); detector = null; }
     }
 }

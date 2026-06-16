@@ -6,7 +6,6 @@ import android.graphics.RectF;
 import android.os.Build;
 import android.util.Log;
 import android.util.Size;
-import android.widget.Toast;
 
 import com.example.yolov5tfliteandroid.utils.Recognition;
 
@@ -31,368 +30,216 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.PriorityQueue;
+import java.util.Map;
 
 
 public class Yolov5TFLiteDetector {
 
-    private final Size INPUT_SIZE = new Size(320, 320);
-    private int NUM_CLASSES = 80;
-    private int[] outputSize = new int[]{1, 6300, 85};
-    private Boolean IS_INT8 = false;
-    private final float DETECT_THRESHOLD = 0.25f;
-    private final float IOU_THRESHOLD = 0.45f;
-    private final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
-    private final String MODEL_YOLOV5S = "yolov5s-fp16-320-metadata.tflite";
-    private final String MODEL_YOLOV5N =  "yolov5n-fp16-320.tflite";
-    private final String MODEL_YOLOV5M = "yolov5m-fp16-320.tflite";
-    private final String MODEL_YOLOV5S_INT8 = "yolov5s-int8-320.tflite";
-    private final String MODEL_CROWDHUMAN = "crowdhuman_vbody_yolov5m.tflite";
-    private final String LABEL_FILE = "coco_label.txt";
-    private final String PERSON_LABEL_FILE = "person_label.txt";
-    MetadataExtractor.QuantizationParams input5SINT8QuantParams = new MetadataExtractor.QuantizationParams(0.003921568859368563f, 0);
-    MetadataExtractor.QuantizationParams output5SINT8QuantParams = new MetadataExtractor.QuantizationParams(0.006305381190031767f, 5);
-    private String MODEL_FILE;
+    private static final Size INPUT_SIZE = new Size(320, 320);
+    private static final float DETECT_THRESHOLD = 0.25f;
+    private static final float IOU_THRESHOLD = 0.45f;
+    private static final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
+    private static final MetadataExtractor.QuantizationParams INPUT_INT8_QUANT =
+            new MetadataExtractor.QuantizationParams(0.003921568859368563f, 0);
+    private static final MetadataExtractor.QuantizationParams OUTPUT_INT8_QUANT =
+            new MetadataExtractor.QuantizationParams(0.006305381190031767f, 5);
+
+    // OCP: Configuration table instead of switch-case
+    private static final Map<String, ModelConfig> MODEL_CONFIGS = new HashMap<>();
+    static {
+        MODEL_CONFIGS.put("yolov5s", new ModelConfig("yolov5s", "yolov5s-fp16-320-metadata.tflite", "coco_label.txt", 80, false));
+        MODEL_CONFIGS.put("yolov5n", new ModelConfig("yolov5n", "yolov5n-fp16-320.tflite", "coco_label.txt", 80, false));
+        MODEL_CONFIGS.put("yolov5m", new ModelConfig("yolov5m", "yolov5m-fp16-320.tflite", "coco_label.txt", 80, false));
+        MODEL_CONFIGS.put("yolov5s-int8", new ModelConfig("yolov5s-int8", "yolov5s-int8-320.tflite", "coco_label.txt", 80, true));
+        MODEL_CONFIGS.put("crowdhuman", new ModelConfig("crowdhuman", "crowdhuman_vbody_yolov5m.tflite", "person_label.txt", 1, false));
+    }
 
     private Interpreter tflite;
     private GpuDelegate gpuDelegate;
     private NnApiDelegate nnApiDelegate;
-    private List<String> associatedAxisLabels;
     private Interpreter.Options options;
+    private List<String> associatedAxisLabels;
+    private ModelConfig currentConfig;
+    private int[] outputSize;
+    private final NmsProcessor nmsProcessor;
 
-    public String getModelFile() {
-        return this.MODEL_FILE;
+    public Yolov5TFLiteDetector() {
+        this.nmsProcessor = new NmsProcessor(DETECT_THRESHOLD, IOU_THRESHOLD);
     }
-
-    private String currentLabelFile = LABEL_FILE;
-
-    public void setModelFile(String modelFile){
-        switch (modelFile) {
-            case "yolov5s":
-                IS_INT8 = false;
-                MODEL_FILE = MODEL_YOLOV5S;
-                currentLabelFile = LABEL_FILE;
-                NUM_CLASSES = 80;
-                break;
-            case "yolov5n":
-                IS_INT8 = false;
-                MODEL_FILE = MODEL_YOLOV5N;
-                currentLabelFile = LABEL_FILE;
-                NUM_CLASSES = 80;
-                break;
-            case "yolov5m":
-                IS_INT8 = false;
-                MODEL_FILE = MODEL_YOLOV5M;
-                currentLabelFile = LABEL_FILE;
-                NUM_CLASSES = 80;
-                break;
-            case "yolov5s-int8":
-                IS_INT8 = true;
-                MODEL_FILE = MODEL_YOLOV5S_INT8;
-                currentLabelFile = LABEL_FILE;
-                NUM_CLASSES = 80;
-                break;
-            case "crowdhuman":
-                IS_INT8 = false;
-                MODEL_FILE = MODEL_CROWDHUMAN;
-                currentLabelFile = PERSON_LABEL_FILE;
-                NUM_CLASSES = 1;
-                break;
-            default:
-                Log.i("tfliteSupport", "Only yolov5s/n/m/sint8/crowdhuman can be load!");
-                return;
-        }
-        outputSize = new int[]{1, 6300, 5 + NUM_CLASSES};
-    }
-
-    public String getLabelFile() {
-        return this.currentLabelFile;
-    }
-
-    public Size getInputSize(){return this.INPUT_SIZE;}
-    public int[] getOutputSize(){return this.outputSize;}
-    public int getNumClasses(){return this.NUM_CLASSES;}
 
     /**
-     * 初始化模型
+     * OCP: Set model by key. Returns true if model key is valid.
      */
-    public void initialModel(Context activity) {
-        if (MODEL_FILE == null) {
-            Log.e("tfliteSupport", "MODEL_FILE is null, call setModelFile first!");
-            Toast.makeText(activity, "No model selected!", Toast.LENGTH_LONG).show();
+    public boolean setModelFile(String modelKey) {
+        ModelConfig config = MODEL_CONFIGS.get(modelKey);
+        if (config == null) {
+            Log.w("tfliteSupport", "Unknown model: " + modelKey + ". Available: " + MODEL_CONFIGS.keySet());
+            return false;
+        }
+        this.currentConfig = config;
+        this.outputSize = new int[]{1, 6300, 5 + config.numClasses};
+        return true;
+    }
+
+    public String getModelFile() { return currentConfig != null ? currentConfig.modelFile : null; }
+    public String getModelKey() { return currentConfig != null ? currentConfig.key : null; }
+    public Size getInputSize() { return INPUT_SIZE; }
+    public int[] getOutputSize() { return outputSize; }
+    public int getNumClasses() { return currentConfig != null ? currentConfig.numClasses : 0; }
+
+    /**
+     * DIP: Load model. Errors reported via callback, no Toast.
+     */
+    public void initialModel(Context context, DetectorCallback callback) {
+        if (currentConfig == null) {
+            if (callback != null) callback.onModelError("No model selected. Call setModelFile() first.");
             return;
         }
         try {
-            // Close previous interpreter and delegates
             close();
 
-            // Create fresh options each time to prevent delegate accumulation
             options = new Interpreter.Options();
             addGPUDelegate();
 
-            ByteBuffer tfliteModel = FileUtil.loadMappedFile(activity, MODEL_FILE);
+            ByteBuffer tfliteModel = FileUtil.loadMappedFile(context, currentConfig.modelFile);
             tflite = new Interpreter(tfliteModel, options);
-            Log.i("tfliteSupport", "Success reading model: " + MODEL_FILE);
+            Log.i("tfliteSupport", "Model loaded: " + currentConfig.modelFile);
 
-            associatedAxisLabels = FileUtil.loadLabels(activity, currentLabelFile);
-            Log.i("tfliteSupport", "Success reading label: " + currentLabelFile);
-            Log.i("tfliteSupport", "Output size: " + Arrays.toString(outputSize) + ", classes: " + NUM_CLASSES);
+            associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
+            Log.i("tfliteSupport", "Labels loaded: " + currentConfig.labelFile
+                    + ", outputSize=" + Arrays.toString(outputSize)
+                    + ", classes=" + currentConfig.numClasses);
+
+            if (callback != null) callback.onModelLoaded(currentConfig.modelFile);
 
         } catch (IOException e) {
-            Log.e("tfliteSupport", "Error reading model or label: ", e);
-            Toast.makeText(activity, "Failed to load model: " + MODEL_FILE + "\n" + e.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e("tfliteSupport", "Error loading model: ", e);
+            if (callback != null) callback.onModelError("Failed to load " + currentConfig.modelFile + ": " + e.getMessage());
         }
     }
 
-    /**
-     * 释放所有 native 资源
-     */
     public void close() {
-        if (tflite != null) {
-            tflite.close();
-            tflite = null;
-            Log.i("tfliteSupport", "TFLite Interpreter closed.");
-        }
-        if (gpuDelegate != null) {
-            gpuDelegate.close();
-            gpuDelegate = null;
-            Log.i("tfliteSupport", "GpuDelegate closed.");
-        }
-        if (nnApiDelegate != null) {
-            nnApiDelegate.close();
-            nnApiDelegate = null;
-            Log.i("tfliteSupport", "NnApiDelegate closed.");
-        }
+        if (tflite != null) { tflite.close(); tflite = null; }
+        if (gpuDelegate != null) { gpuDelegate.close(); gpuDelegate = null; }
+        if (nnApiDelegate != null) { nnApiDelegate.close(); nnApiDelegate = null; }
         options = null;
     }
 
+    /**
+     * LSP: Returns empty list if model not loaded (caller can check getModelFile() != null first).
+     */
     public ArrayList<Recognition> detect(Bitmap bitmap) {
-        if (tflite == null) {
+        if (tflite == null || currentConfig == null) {
             Log.e("tfliteSupport", "Interpreter is null, model not loaded!");
             return new ArrayList<>();
         }
 
-        TensorImage yolov5sTfliteInput;
-        ImageProcessor imageProcessor;
-        if(IS_INT8){
-            imageProcessor =
-                    new ImageProcessor.Builder()
-                            .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
-                            .add(new NormalizeOp(0, 255))
-                            .add(new QuantizeOp(input5SINT8QuantParams.getZeroPoint(), input5SINT8QuantParams.getScale()))
-                            .add(new CastOp(DataType.UINT8))
-                            .build();
-            yolov5sTfliteInput = new TensorImage(DataType.UINT8);
-        }else{
-            imageProcessor =
-                    new ImageProcessor.Builder()
-                            .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
-                            .add(new NormalizeOp(0, 255))
-                            .build();
-            yolov5sTfliteInput = new TensorImage(DataType.FLOAT32);
-        }
+        // Preprocess
+        TensorImage input = preprocessImage(bitmap);
 
-        yolov5sTfliteInput.load(bitmap);
-        yolov5sTfliteInput = imageProcessor.process(yolov5sTfliteInput);
+        // Run inference
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize,
+                currentConfig.isInt8 ? DataType.UINT8 : DataType.FLOAT32);
+        tflite.run(input.getBuffer(), outputBuffer.getBuffer());
 
-        TensorBuffer probabilityBuffer;
-        if(IS_INT8){
-            probabilityBuffer = TensorBuffer.createFixedSize(outputSize, DataType.UINT8);
-        }else{
-            probabilityBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
-        }
-
-        tflite.run(yolov5sTfliteInput.getBuffer(), probabilityBuffer.getBuffer());
-
-        if(IS_INT8){
-            TensorProcessor tensorProcessor = new TensorProcessor.Builder()
-                    .add(new DequantizeOp(output5SINT8QuantParams.getZeroPoint(), output5SINT8QuantParams.getScale()))
+        // Post-process INT8 if needed
+        if (currentConfig.isInt8) {
+            TensorProcessor tp = new TensorProcessor.Builder()
+                    .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
                     .build();
-            probabilityBuffer = tensorProcessor.process(probabilityBuffer);
+            outputBuffer = tp.process(outputBuffer);
         }
 
-        float[] recognitionArray = probabilityBuffer.getFloatArray();
-        ArrayList<Recognition> allRecognitions = new ArrayList<>();
-        for (int i = 0; i < outputSize[1]; i++) {
-            int gridStride = i * outputSize[2];
-            float x = recognitionArray[0 + gridStride] * INPUT_SIZE.getWidth();
-            float y = recognitionArray[1 + gridStride] * INPUT_SIZE.getHeight();
-            float w = recognitionArray[2 + gridStride] * INPUT_SIZE.getWidth();
-            float h = recognitionArray[3 + gridStride] * INPUT_SIZE.getHeight();
-            int xmin = (int) Math.max(0, x - w / 2.);
-            int ymin = (int) Math.max(0, y - h / 2.);
-            int xmax = (int) Math.min(INPUT_SIZE.getWidth(), x + w / 2.);
-            int ymax = (int) Math.min(INPUT_SIZE.getHeight(), y + h / 2.);
-            float confidence = recognitionArray[4 + gridStride];
-            float[] classScores = Arrays.copyOfRange(recognitionArray, 5 + gridStride, this.outputSize[2] + gridStride);
+        // Decode output
+        ArrayList<Recognition> allRecognitions = decodeOutput(outputBuffer.getFloatArray());
 
+        // NMS (OCP: single unified method)
+        ArrayList<Recognition> filtered = nmsProcessor.suppress(
+                allRecognitions, currentConfig.numClasses, IOU_CLASS_DUPLICATED_THRESHOLD);
+
+        // Assign labels
+        assignLabels(filtered);
+
+        return filtered;
+    }
+
+    private TensorImage preprocessImage(Bitmap bitmap) {
+        ImageProcessor.Builder builder = new ImageProcessor.Builder()
+                .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
+                .add(new NormalizeOp(0, 255));
+
+        if (currentConfig.isInt8) {
+            builder.add(new QuantizeOp(INPUT_INT8_QUANT.getZeroPoint(), INPUT_INT8_QUANT.getScale()))
+                   .add(new CastOp(DataType.UINT8));
+            TensorImage input = new TensorImage(DataType.UINT8);
+            input.load(bitmap);
+            return builder.build().process(input);
+        } else {
+            TensorImage input = new TensorImage(DataType.FLOAT32);
+            input.load(bitmap);
+            return builder.build().process(input);
+        }
+    }
+
+    private ArrayList<Recognition> decodeOutput(float[] data) {
+        ArrayList<Recognition> results = new ArrayList<>();
+        for (int i = 0; i < outputSize[1]; i++) {
+            int stride = i * outputSize[2];
+            float x = data[0 + stride] * INPUT_SIZE.getWidth();
+            float y = data[1 + stride] * INPUT_SIZE.getHeight();
+            float w = data[2 + stride] * INPUT_SIZE.getWidth();
+            float h = data[3 + stride] * INPUT_SIZE.getHeight();
+            int xmin = (int) Math.max(0, x - w / 2);
+            int ymin = (int) Math.max(0, y - h / 2);
+            int xmax = (int) Math.min(INPUT_SIZE.getWidth(), x + w / 2);
+            int ymax = (int) Math.min(INPUT_SIZE.getHeight(), y + h / 2);
+            float confidence = data[4 + stride];
+
+            float[] classScores = Arrays.copyOfRange(data, 5 + stride, outputSize[2] + stride);
             int labelId = 0;
-            float maxLabelScores = 0.f;
+            float maxScore = 0;
             for (int j = 0; j < classScores.length; j++) {
-                if (classScores[j] > maxLabelScores) {
-                    maxLabelScores = classScores[j];
+                if (classScores[j] > maxScore) {
+                    maxScore = classScores[j];
                     labelId = j;
                 }
             }
 
-            Recognition r = new Recognition(
-                    labelId,
-                    "",
-                    maxLabelScores,
-                    confidence,
-                    new RectF(xmin, ymin, xmax, ymax));
-            allRecognitions.add(r);
+            results.add(new Recognition(labelId, "", maxScore, confidence,
+                    new RectF(xmin, ymin, xmax, ymax)));
         }
+        return results;
+    }
 
-        ArrayList<Recognition> nmsRecognitions = nms(allRecognitions);
-        ArrayList<Recognition> nmsFilterBoxDuplicationRecognitions = nmsAllClass(nmsRecognitions);
-
-        for(Recognition recognition : nmsFilterBoxDuplicationRecognitions){
-            int labelId = recognition.getLabelId();
-            if (labelId >= 0 && labelId < associatedAxisLabels.size()) {
-                recognition.setLabelName(associatedAxisLabels.get(labelId));
+    private void assignLabels(ArrayList<Recognition> recognitions) {
+        for (Recognition r : recognitions) {
+            int id = r.getLabelId();
+            if (id >= 0 && id < associatedAxisLabels.size()) {
+                r.setLabelName(associatedAxisLabels.get(id));
             } else {
-                recognition.setLabelName("unknown_" + labelId);
+                r.setLabelName("unknown_" + id);
             }
         }
-
-        return nmsFilterBoxDuplicationRecognitions;
     }
 
-    protected ArrayList<Recognition> nms(ArrayList<Recognition> allRecognitions) {
-        ArrayList<Recognition> nmsRecognitions = new ArrayList<Recognition>();
-        for (int i = 0; i < NUM_CLASSES; i++) {
-            PriorityQueue<Recognition> pq =
-                    new PriorityQueue<Recognition>(
-                            6300,
-                            new Comparator<Recognition>() {
-                                @Override
-                                public int compare(final Recognition l, final Recognition r) {
-                                    return Float.compare(r.getConfidence(), l.getConfidence());
-                                }
-                            });
-
-            for (int j = 0; j < allRecognitions.size(); ++j) {
-                if (allRecognitions.get(j).getLabelId() == i && allRecognitions.get(j).getConfidence() > DETECT_THRESHOLD) {
-                    pq.add(allRecognitions.get(j));
-                }
-            }
-
-            while (pq.size() > 0) {
-                Recognition[] a = new Recognition[pq.size()];
-                Recognition[] detections = pq.toArray(a);
-                Recognition max = detections[0];
-                nmsRecognitions.add(max);
-                pq.clear();
-
-                for (int k = 1; k < detections.length; k++) {
-                    Recognition detection = detections[k];
-                    if (boxIou(max.getLocation(), detection.getLocation()) < IOU_THRESHOLD) {
-                        pq.add(detection);
-                    }
-                }
-            }
-        }
-        return nmsRecognitions;
-    }
-
-    protected ArrayList<Recognition> nmsAllClass(ArrayList<Recognition> allRecognitions) {
-        ArrayList<Recognition> nmsRecognitions = new ArrayList<Recognition>();
-
-        PriorityQueue<Recognition> pq =
-                new PriorityQueue<Recognition>(
-                        100,
-                        new Comparator<Recognition>() {
-                            @Override
-                            public int compare(final Recognition l, final Recognition r) {
-                                return Float.compare(r.getConfidence(), l.getConfidence());
-                            }
-                        });
-
-        for (int j = 0; j < allRecognitions.size(); ++j) {
-            if (allRecognitions.get(j).getConfidence() > DETECT_THRESHOLD) {
-                pq.add(allRecognitions.get(j));
-            }
-        }
-
-        while (pq.size() > 0) {
-            Recognition[] a = new Recognition[pq.size()];
-            Recognition[] detections = pq.toArray(a);
-            Recognition max = detections[0];
-            nmsRecognitions.add(max);
-            pq.clear();
-
-            for (int k = 1; k < detections.length; k++) {
-                Recognition detection = detections[k];
-                if (boxIou(max.getLocation(), detection.getLocation()) < IOU_CLASS_DUPLICATED_THRESHOLD) {
-                    pq.add(detection);
-                }
-            }
-        }
-        return nmsRecognitions;
-    }
-
-
-    protected float boxIou(RectF a, RectF b) {
-        float intersection = boxIntersection(a, b);
-        float union = boxUnion(a, b);
-        if (union <= 0) return 1;
-        return intersection / union;
-    }
-
-    protected float boxIntersection(RectF a, RectF b) {
-        float maxLeft = a.left > b.left ? a.left : b.left;
-        float maxTop = a.top > b.top ? a.top : b.top;
-        float minRight = a.right < b.right ? a.right : b.right;
-        float minBottom = a.bottom < b.bottom ? a.bottom : b.bottom;
-        float w = minRight -  maxLeft;
-        float h = minBottom - maxTop;
-
-        if (w < 0 || h < 0) return 0;
-        return w * h;
-    }
-
-    protected float boxUnion(RectF a, RectF b) {
-        float i = boxIntersection(a, b);
-        float u = (a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - i;
-        return u;
-    }
-
-    /**
-     * 添加NNapi代理, 保存引用以便后续释放
-     */
-    public void addNNApiDelegate() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            nnApiDelegate = new NnApiDelegate();
-            if (options != null) {
-                options.addDelegate(nnApiDelegate);
-            }
-            Log.i("tfliteSupport", "using nnapi delegate.");
-        }
-    }
-
-    /**
-     * 添加GPU代理, 保存 delegate 引用以便后续释放
-     */
-    public void addGPUDelegate() {
+    private void addGPUDelegate() {
         if (options == null) return;
-        CompatibilityList compatibilityList = new CompatibilityList();
-        if(compatibilityList.isDelegateSupportedOnThisDevice()){
-            GpuDelegate.Options delegateOptions = compatibilityList.getBestOptionsForThisDevice();
-            gpuDelegate = new GpuDelegate(delegateOptions);
+        CompatibilityList compat = new CompatibilityList();
+        if (compat.isDelegateSupportedOnThisDevice()) {
+            gpuDelegate = new GpuDelegate(compat.getBestOptionsForThisDevice());
             options.addDelegate(gpuDelegate);
             Log.i("tfliteSupport", "using gpu delegate.");
         } else {
-            addThread(4);
+            options.setNumThreads(4);
         }
     }
 
-    public void addThread(int thread) {
-        if (options != null) {
-            options.setNumThreads(thread);
+    public void addNNApiDelegate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && options != null) {
+            nnApiDelegate = new NnApiDelegate();
+            options.addDelegate(nnApiDelegate);
         }
     }
-
 }
