@@ -44,37 +44,60 @@ jobs:
             exit 1
           fi
 
+      - name: Verify model file exists in assets
+        run: |
+          echo "=== Assets files ==="
+          ls -lh app/src/main/assets/*.tflite
+          echo "=== Checking crowdhuman model ==="
+          test -f app/src/main/assets/crowdhuman_vbody_yolov5m.tflite && echo "OK: crowdhuman model exists" || { echo "FAIL: crowdhuman model missing!"; exit 1; }
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build APK with Gradle
+      - name: Build Debug APK
         run: ./gradlew assembleDebug
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
 
       - name: List build outputs
         run: |
+          echo "=== Debug APK ==="
           ls -lh app/build/outputs/apk/debug/
+          echo "=== Release APK ==="
+          ls -lh app/build/outputs/apk/release/
 
-      - name: Upload APK artifact
+      - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crowdhuman-detector-apk
+          name: crowdhuman-detector-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Upload Release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crowdhuman-detector-release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 90
 
       - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0-apk
-          name: "CrowdHuman Person Detector APK v1.0.0"
+          tag_name: v1.0.${{ github.run_number }}
+          name: "CrowdHuman Person Detector v1.0.${{ github.run_number }}"
           body: |
             ## CrowdHuman Person Detector - Android APK
 
             ### Features
             - Real-time person detection using YOLOv5m trained on CrowdHuman dataset
             - Supports crowded scenes (back view, side view, partial occlusion)
-            - Camera-based real-time detection
+            - Camera-based real-time detection with front/back camera switch
             - Switch between CrowdHuman model and standard COCO models
+            - Detection count display
+            - Screenshot save to gallery
+            - Full-screen / full-image display modes
 
             ### Model Info
             - **Base model**: YOLOv5m
@@ -88,16 +111,10 @@ jobs:
             3. Install the APK
             4. Grant camera permission when prompted
 
-            ### Usage
-            - Open the app
-            - Point camera at people
-            - The app will detect and draw bounding boxes around persons
-            - Use the dropdown to switch between models
-
             ### Requirements
             - Android 7.0+ (API 24+)
             - Camera permission
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/release/*.apk
           draft: false
           prerelease: false
         env:

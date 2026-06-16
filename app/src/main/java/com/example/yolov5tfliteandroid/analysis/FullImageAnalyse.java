@@ -7,9 +7,12 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -23,34 +26,54 @@ import com.example.yolov5tfliteandroid.utils.ImageProcess;
 import com.example.yolov5tfliteandroid.utils.Recognition;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.core.ObservableEmitter;
+import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
+/**
+ * Unified analyser that supports both full-image and full-screen modes.
+ * Mode is controlled by the useFullScreenCrop parameter.
+ */
 public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     public static class Result {
-        public Result(long costTime, Bitmap bitmap) {
+        public Result(long costTime, Bitmap bitmap, int detectCount) {
             this.costTime = costTime;
             this.bitmap = bitmap;
+            this.detectCount = detectCount;
         }
         long costTime;
         Bitmap bitmap;
+        int detectCount;
     }
 
-    ImageView boxLabelCanvas;
-    PreviewView previewView;
-    int rotation;
-    private TextView inferenceTimeTextView;
-    private TextView frameSizeTextView;
-    ImageProcess imageProcess;
-    private Yolov5TFLiteDetector yolov5TFLiteDetector;
+    public interface ScreenshotListener {
+        void onScreenshotReady(Bitmap bitmap);
+    }
 
-    // Reusable Paint objects to avoid allocation per frame
+    private final ImageView boxLabelCanvas;
+    private final PreviewView previewView;
+    private final int rotation;
+    private final TextView inferenceTimeTextView;
+    private final TextView frameSizeTextView;
+    private final TextView detectCountTextView;
+    private final Yolov5TFLiteDetector yolov5TFLiteDetector;
+    private final ImageProcess imageProcess;
+    private final boolean useFullScreenCrop;
+    private final float textScale;
+
+    // Reusable Paint objects
     private final Paint boxPaint = new Paint();
+    private final Paint textBgPaint = new Paint();
     private final Paint textPaint = new Paint();
+
+    // RxJava disposable management
+    private Disposable currentDisposable;
+    private ScreenshotListener screenshotListener;
 
     public FullImageAnalyse(Context context,
                             PreviewView previewView,
@@ -58,22 +81,65 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                             int rotation,
                             TextView inferenceTimeTextView,
                             TextView frameSizeTextView,
-                            Yolov5TFLiteDetector yolov5TFLiteDetector) {
+                            TextView detectCountTextView,
+                            Yolov5TFLiteDetector yolov5TFLiteDetector,
+                            boolean useFullScreenCrop) {
         this.previewView = previewView;
         this.boxLabelCanvas = boxLabelCanvas;
         this.rotation = rotation;
         this.inferenceTimeTextView = inferenceTimeTextView;
         this.frameSizeTextView = frameSizeTextView;
-        this.imageProcess = new ImageProcess();
+        this.detectCountTextView = detectCountTextView;
         this.yolov5TFLiteDetector = yolov5TFLiteDetector;
+        this.imageProcess = new ImageProcess();
+        this.useFullScreenCrop = useFullScreenCrop;
+
+        // Calculate text scale based on screen density
+        DisplayMetrics dm = context.getResources().getDisplayMetrics();
+        textScale = dm.density;
 
         // Initialize Paint objects once
-        boxPaint.setStrokeWidth(5);
+        boxPaint.setStrokeWidth(3 * textScale);
         boxPaint.setStyle(Paint.Style.STROKE);
         boxPaint.setColor(Color.RED);
-        textPaint.setTextSize(50);
-        textPaint.setColor(Color.RED);
+
+        float textSize = 14 * textScale;
+        textPaint.setTextSize(textSize);
+        textPaint.setColor(Color.WHITE);
         textPaint.setStyle(Paint.Style.FILL);
+        textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+
+        textBgPaint.setStyle(Paint.Style.FILL);
+        textBgPaint.setColor(Color.argb(180, 0, 0, 0));
+    }
+
+    public void setScreenshotListener(ScreenshotListener listener) {
+        this.screenshotListener = listener;
+    }
+
+    public void takeScreenshot() {
+        if (screenshotListener != null && boxLabelCanvas != null) {
+            boxLabelCanvas.post(() -> {
+                Drawable drawable = boxLabelCanvas.getDrawable();
+                if (drawable instanceof BitmapDrawable) {
+                    Bitmap bmp = ((BitmapDrawable) drawable).getBitmap();
+                    if (bmp != null && !bmp.isRecycled()) {
+                        screenshotListener.onScreenshotReady(bmp.copy(Bitmap.Config.ARGB_8888, false));
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Cancel previous subscription to prevent memory leaks
+     */
+    public void dispose() {
+        if (currentDisposable != null && !currentDisposable.isDisposed()) {
+            currentDisposable.dispose();
+            currentDisposable = null;
+            Log.i("FullImageAnalyse", "Previous subscription disposed.");
+        }
     }
 
     @Override
@@ -86,14 +152,17 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             return;
         }
 
-        Observable.create((ObservableEmitter<Result> emitter) -> {
+        // Dispose previous subscription
+        dispose();
+
+        currentDisposable = Observable.create((ObservableEmitter<Result> emitter) -> {
             long start = System.currentTimeMillis();
 
             Bitmap imageBitmap = null;
             Bitmap fullImageBitmap = null;
             Bitmap cropImageBitmap = null;
             Bitmap modelInputBitmap = null;
-            Bitmap emptyCropSizeBitmap = null;
+            Bitmap resultBitmap = null;
 
             try {
                 byte[][] yuvBytes = new byte[3][];
@@ -108,21 +177,13 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 int[] rgbBytes = new int[imageHeight * imageWidth];
                 imageProcess.YUV420ToARGB8888(
-                        yuvBytes[0],
-                        yuvBytes[1],
-                        yuvBytes[2],
-                        imageWidth,
-                        imageHeight,
-                        yRowStride,
-                        uvRowStride,
-                        uvPixelStride,
-                        rgbBytes);
+                        yuvBytes[0], yuvBytes[1], yuvBytes[2],
+                        imageWidth, imageHeight,
+                        yRowStride, uvRowStride, uvPixelStride, rgbBytes);
 
-                // 原图bitmap
                 imageBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
                 imageBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
 
-                // 图片适应屏幕fill_start格式的bitmap
                 double scale = Math.max(
                         previewHeight / (double) (rotation % 180 == 0 ? imageWidth : imageHeight),
                         previewWidth / (double) (rotation % 180 == 0 ? imageHeight : imageWidth)
@@ -130,37 +191,48 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 int scaledW = (int) (scale * imageHeight);
                 int scaledH = (int) (scale * imageWidth);
                 if (scaledW <= 0 || scaledH <= 0) {
-                    emitter.onNext(new Result(0, null));
+                    emitter.onNext(new Result(0, null, 0));
                     return;
                 }
 
                 Matrix fullScreenTransform = imageProcess.getTransformationMatrix(
-                        imageWidth, imageHeight,
-                        scaledW, scaledH,
-                        rotation % 180 == 0 ? 90 : 0, false
-                );
+                        imageWidth, imageHeight, scaledW, scaledH,
+                        rotation % 180 == 0 ? 90 : 0, false);
 
-                // 适应preview的全尺寸bitmap
                 fullImageBitmap = Bitmap.createBitmap(imageBitmap, 0, 0, imageWidth, imageHeight, fullScreenTransform, false);
 
-                // 裁剪出跟preview在屏幕上一样大小的bitmap (with bounds check)
                 int cropW = Math.min(previewWidth, fullImageBitmap.getWidth());
                 int cropH = Math.min(previewHeight, fullImageBitmap.getHeight());
                 if (cropW <= 0 || cropH <= 0) {
-                    emitter.onNext(new Result(0, null));
+                    emitter.onNext(new Result(0, null, 0));
                     return;
                 }
-                cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, 0, 0, cropW, cropH);
 
-                // 模型输入的bitmap
-                Matrix previewToModelTransform =
-                        imageProcess.getTransformationMatrix(
-                                cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
-                                yolov5TFLiteDetector.getInputSize().getWidth(),
-                                yolov5TFLiteDetector.getInputSize().getHeight(),
-                                0, false);
-                modelInputBitmap = Bitmap.createBitmap(cropImageBitmap, 0, 0,
-                        cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
+                // Full-screen mode: crop center; Full-image mode: use full image scaled to preview
+                Bitmap inputForModel;
+                if (useFullScreenCrop) {
+                    int offsetX = Math.max(0, (fullImageBitmap.getWidth() - previewWidth) / 2);
+                    int offsetY = Math.max(0, (fullImageBitmap.getHeight() - previewHeight) / 2);
+                    cropW = Math.min(cropW, fullImageBitmap.getWidth() - offsetX);
+                    cropH = Math.min(cropH, fullImageBitmap.getHeight() - offsetY);
+                    if (cropW <= 0 || cropH <= 0) {
+                        emitter.onNext(new Result(0, null, 0));
+                        return;
+                    }
+                    cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, offsetX, offsetY, cropW, cropH);
+                    inputForModel = cropImageBitmap;
+                } else {
+                    cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, 0, 0, cropW, cropH);
+                    inputForModel = cropImageBitmap;
+                }
+
+                Matrix previewToModelTransform = imageProcess.getTransformationMatrix(
+                        inputForModel.getWidth(), inputForModel.getHeight(),
+                        yolov5TFLiteDetector.getInputSize().getWidth(),
+                        yolov5TFLiteDetector.getInputSize().getHeight(),
+                        0, false);
+                modelInputBitmap = Bitmap.createBitmap(inputForModel, 0, 0,
+                        inputForModel.getWidth(), inputForModel.getHeight(),
                         previewToModelTransform, false);
 
                 Matrix modelToPreviewTransform = new Matrix();
@@ -168,37 +240,55 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     previewToModelTransform.invert(modelToPreviewTransform);
                 } catch (IllegalArgumentException e) {
                     Log.e("FullImageAnalyse", "Matrix invert failed: " + e.getMessage());
-                    emitter.onNext(new Result(0, null));
+                    emitter.onNext(new Result(0, null, 0));
                     return;
                 }
 
                 ArrayList<Recognition> recognitions = yolov5TFLiteDetector.detect(modelInputBitmap);
 
-                emptyCropSizeBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888);
-                Canvas cropCanvas = new Canvas(emptyCropSizeBitmap);
+                resultBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888);
+                Canvas cropCanvas = new Canvas(resultBitmap);
 
                 for (Recognition res : recognitions) {
                     RectF location = res.getLocation();
                     String label = res.getLabelName();
                     float confidence = res.getConfidence();
                     modelToPreviewTransform.mapRect(location);
+
+                    // Clamp to screen bounds
+                    location.left = Math.max(0, location.left);
+                    location.top = Math.max(0, location.top);
+                    location.right = Math.min(previewWidth, location.right);
+                    location.bottom = Math.min(previewHeight, location.bottom);
+
                     cropCanvas.drawRect(location, boxPaint);
-                    cropCanvas.drawText(label + ":" + String.format("%.2f", confidence), location.left, location.top, textPaint);
+
+                    // Draw label with background for readability
+                    String text = label + ":" + String.format(Locale.US, "%.2f", confidence);
+                    float textWidth = textPaint.measureText(text);
+                    float textHeight = textPaint.getTextSize();
+                    float textX = location.left;
+                    float textY = location.top > textHeight ? location.top : location.top + textHeight;
+
+                    // Background rect
+                    cropCanvas.drawRect(textX - 2 * textScale, textY - textHeight - 2 * textScale,
+                            textX + textWidth + 4 * textScale, textY + 2 * textScale, textBgPaint);
+                    // Text
+                    cropCanvas.drawText(text, textX, textY, textPaint);
                 }
+
                 long end = System.currentTimeMillis();
-                long costTime = (end - start);
-                emitter.onNext(new Result(costTime, emptyCropSizeBitmap));
+                emitter.onNext(new Result(end - start, resultBitmap, recognitions.size()));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error in analyze: " + e.getMessage(), e);
-                emitter.onNext(new Result(0, null));
+                emitter.onNext(new Result(0, null, 0));
             } finally {
-                // Recycle all intermediate bitmaps to prevent memory leaks
                 if (imageBitmap != null && !imageBitmap.isRecycled()) imageBitmap.recycle();
                 if (fullImageBitmap != null && !fullImageBitmap.isRecycled()) fullImageBitmap.recycle();
                 if (cropImageBitmap != null && !cropImageBitmap.isRecycled()) cropImageBitmap.recycle();
                 if (modelInputBitmap != null && !modelInputBitmap.isRecycled()) modelInputBitmap.recycle();
-                // Note: emptyCropSizeBitmap is passed to UI, will be recycled by ImageView when replaced
+                // resultBitmap is passed to UI, will be recycled when replaced
                 image.close();
             }
 
@@ -207,7 +297,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 .subscribe(
                         (Result result) -> {
                             if (result.bitmap != null) {
-                                // Recycle previous bitmap before setting new one
                                 Drawable prevDrawable = boxLabelCanvas.getDrawable();
                                 if (prevDrawable instanceof BitmapDrawable) {
                                     Bitmap prev = ((BitmapDrawable) prevDrawable).getBitmap();
@@ -218,7 +307,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                                 boxLabelCanvas.setImageBitmap(result.bitmap);
                             }
                             frameSizeTextView.setText(previewHeight + "x" + previewWidth);
-                            inferenceTimeTextView.setText(Long.toString(result.costTime) + "ms");
+                            inferenceTimeTextView.setText(result.costTime + "ms");
+                            if (detectCountTextView != null) {
+                                detectCountTextView.setText(String.valueOf(result.detectCount));
+                            }
                         },
                         (Throwable error) -> {
                             Log.e("FullImageAnalyse", "RxJava error: " + error.getMessage(), error);

@@ -39,8 +39,6 @@ import java.util.PriorityQueue;
 public class Yolov5TFLiteDetector {
 
     private final Size INPUT_SIZE = new Size(320, 320);
-    // COCO 80 classes: output shape [1, 6300, 85] (85 = 5 + 80)
-    // CrowdHuman 1 class: output shape [1, 6300, 6] (6 = 5 + 1)
     private int NUM_CLASSES = 80;
     private int[] outputSize = new int[]{1, 6300, 85};
     private Boolean IS_INT8 = false;
@@ -60,8 +58,9 @@ public class Yolov5TFLiteDetector {
 
     private Interpreter tflite;
     private GpuDelegate gpuDelegate;
+    private NnApiDelegate nnApiDelegate;
     private List<String> associatedAxisLabels;
-    Interpreter.Options options = new Interpreter.Options();
+    private Interpreter.Options options;
 
     public String getModelFile() {
         return this.MODEL_FILE;
@@ -105,7 +104,6 @@ public class Yolov5TFLiteDetector {
                 Log.i("tfliteSupport", "Only yolov5s/n/m/sint8/crowdhuman can be load!");
                 return;
         }
-        // Update output size based on number of classes: [1, 6300, 5 + NUM_CLASSES]
         outputSize = new int[]{1, 6300, 5 + NUM_CLASSES};
     }
 
@@ -115,11 +113,10 @@ public class Yolov5TFLiteDetector {
 
     public Size getInputSize(){return this.INPUT_SIZE;}
     public int[] getOutputSize(){return this.outputSize;}
+    public int getNumClasses(){return this.NUM_CLASSES;}
 
     /**
-     * 初始化模型, 可以通过 addNNApiDelegate(), addGPUDelegate()提前加载相应代理
-     *
-     * @param activity
+     * 初始化模型
      */
     public void initialModel(Context activity) {
         if (MODEL_FILE == null) {
@@ -127,10 +124,13 @@ public class Yolov5TFLiteDetector {
             Toast.makeText(activity, "No model selected!", Toast.LENGTH_LONG).show();
             return;
         }
-        // Initialise the model
         try {
-            // Close previous interpreter if exists
+            // Close previous interpreter and delegates
             close();
+
+            // Create fresh options each time to prevent delegate accumulation
+            options = new Interpreter.Options();
+            addGPUDelegate();
 
             ByteBuffer tfliteModel = FileUtil.loadMappedFile(activity, MODEL_FILE);
             tflite = new Interpreter(tfliteModel, options);
@@ -142,12 +142,12 @@ public class Yolov5TFLiteDetector {
 
         } catch (IOException e) {
             Log.e("tfliteSupport", "Error reading model or label: ", e);
-            Toast.makeText(activity, "load model error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(activity, "Failed to load model: " + MODEL_FILE + "\n" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
     /**
-     * 释放 Interpreter 和 GpuDelegate 的 native 内存
+     * 释放所有 native 资源
      */
     public void close() {
         if (tflite != null) {
@@ -160,21 +160,20 @@ public class Yolov5TFLiteDetector {
             gpuDelegate = null;
             Log.i("tfliteSupport", "GpuDelegate closed.");
         }
+        if (nnApiDelegate != null) {
+            nnApiDelegate.close();
+            nnApiDelegate = null;
+            Log.i("tfliteSupport", "NnApiDelegate closed.");
+        }
+        options = null;
     }
 
-    /**
-     * 检测步骤
-     *
-     * @param bitmap
-     * @return
-     */
     public ArrayList<Recognition> detect(Bitmap bitmap) {
         if (tflite == null) {
             Log.e("tfliteSupport", "Interpreter is null, model not loaded!");
             return new ArrayList<>();
         }
 
-        // yolov5s-tflite的输入是:[1, 320, 320,3], 摄像头每一帧图片需要resize,再归一化
         TensorImage yolov5sTfliteInput;
         ImageProcessor imageProcessor;
         if(IS_INT8){
@@ -198,7 +197,6 @@ public class Yolov5TFLiteDetector {
         yolov5sTfliteInput.load(bitmap);
         yolov5sTfliteInput = imageProcessor.process(yolov5sTfliteInput);
 
-        // yolov5s-tflite的输出是:[1, 6300, 85] or [1, 6300, 6] for crowdhuman
         TensorBuffer probabilityBuffer;
         if(IS_INT8){
             probabilityBuffer = TensorBuffer.createFixedSize(outputSize, DataType.UINT8);
@@ -206,10 +204,8 @@ public class Yolov5TFLiteDetector {
             probabilityBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
         }
 
-        // 推理计算
         tflite.run(yolov5sTfliteInput.getBuffer(), probabilityBuffer.getBuffer());
 
-        // 这里输出反量化,需要是模型tflite.run之后执行.
         if(IS_INT8){
             TensorProcessor tensorProcessor = new TensorProcessor.Builder()
                     .add(new DequantizeOp(output5SINT8QuantParams.getZeroPoint(), output5SINT8QuantParams.getScale()))
@@ -217,13 +213,10 @@ public class Yolov5TFLiteDetector {
             probabilityBuffer = tensorProcessor.process(probabilityBuffer);
         }
 
-        // 输出数据被平铺了出来
         float[] recognitionArray = probabilityBuffer.getFloatArray();
-        // 这里将flatten的数组重新解析(xywh,obj,classes).
         ArrayList<Recognition> allRecognitions = new ArrayList<>();
         for (int i = 0; i < outputSize[1]; i++) {
             int gridStride = i * outputSize[2];
-            // 由于yolov5作者在导出tflite的时候对输出除以了image size, 所以这里需要乘回去
             float x = recognitionArray[0 + gridStride] * INPUT_SIZE.getWidth();
             float y = recognitionArray[1 + gridStride] * INPUT_SIZE.getHeight();
             float w = recognitionArray[2 + gridStride] * INPUT_SIZE.getWidth();
@@ -253,17 +246,13 @@ public class Yolov5TFLiteDetector {
             allRecognitions.add(r);
         }
 
-        // 非极大抑制输出
         ArrayList<Recognition> nmsRecognitions = nms(allRecognitions);
-        // 第二次非极大抑制, 过滤那些同个目标识别到2个以上目标边框为不同类别的
         ArrayList<Recognition> nmsFilterBoxDuplicationRecognitions = nmsAllClass(nmsRecognitions);
 
-        // 更新label信息, with bounds check
         for(Recognition recognition : nmsFilterBoxDuplicationRecognitions){
             int labelId = recognition.getLabelId();
             if (labelId >= 0 && labelId < associatedAxisLabels.size()) {
-                String labelName = associatedAxisLabels.get(labelId);
-                recognition.setLabelName(labelName);
+                recognition.setLabelName(associatedAxisLabels.get(labelId));
             } else {
                 recognition.setLabelName("unknown_" + labelId);
             }
@@ -272,16 +261,8 @@ public class Yolov5TFLiteDetector {
         return nmsFilterBoxDuplicationRecognitions;
     }
 
-    /**
-     * 非极大抑制
-     *
-     * @param allRecognitions
-     * @return
-     */
     protected ArrayList<Recognition> nms(ArrayList<Recognition> allRecognitions) {
         ArrayList<Recognition> nmsRecognitions = new ArrayList<Recognition>();
-
-        // 遍历每个类别, 在每个类别下做nms
         for (int i = 0; i < NUM_CLASSES; i++) {
             PriorityQueue<Recognition> pq =
                     new PriorityQueue<Recognition>(
@@ -317,9 +298,6 @@ public class Yolov5TFLiteDetector {
         return nmsRecognitions;
     }
 
-    /**
-     * 对所有数据不区分类别做非极大抑制
-     */
     protected ArrayList<Recognition> nmsAllClass(ArrayList<Recognition> allRecognitions) {
         ArrayList<Recognition> nmsRecognitions = new ArrayList<Recognition>();
 
@@ -373,8 +351,7 @@ public class Yolov5TFLiteDetector {
         float h = minBottom - maxTop;
 
         if (w < 0 || h < 0) return 0;
-        float area = w * h;
-        return area;
+        return w * h;
     }
 
     protected float boxUnion(RectF a, RectF b) {
@@ -384,12 +361,14 @@ public class Yolov5TFLiteDetector {
     }
 
     /**
-     * 添加NNapi代理
+     * 添加NNapi代理, 保存引用以便后续释放
      */
     public void addNNApiDelegate() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            NnApiDelegate nnApiDelegate = new NnApiDelegate();
-            options.addDelegate(nnApiDelegate);
+            nnApiDelegate = new NnApiDelegate();
+            if (options != null) {
+                options.addDelegate(nnApiDelegate);
+            }
             Log.i("tfliteSupport", "using nnapi delegate.");
         }
     }
@@ -398,6 +377,7 @@ public class Yolov5TFLiteDetector {
      * 添加GPU代理, 保存 delegate 引用以便后续释放
      */
     public void addGPUDelegate() {
+        if (options == null) return;
         CompatibilityList compatibilityList = new CompatibilityList();
         if(compatibilityList.isDelegateSupportedOnThisDevice()){
             GpuDelegate.Options delegateOptions = compatibilityList.getBestOptionsForThisDevice();
@@ -409,12 +389,10 @@ public class Yolov5TFLiteDetector {
         }
     }
 
-    /**
-     * 添加线程数
-     * @param thread
-     */
     public void addThread(int thread) {
-        options.setNumThreads(thread);
+        if (options != null) {
+            options.setNumThreads(thread);
+        }
     }
 
 }

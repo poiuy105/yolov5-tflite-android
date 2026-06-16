@@ -1,13 +1,18 @@
 <resources>
-    <string name="app_name">CrowdHuman Person Detector</string>
-    <string name="inference_time_label">inference time: </string>
-    <string name="frame_size_label">Frame size: </string>
-    <string name="immersive_label">immersive: </string>
+    <string name="app_name">CrowdHuman Detector</string>
+    <string name="inference_time_label">inference: </string>
+    <string name="frame_size_label">frame: </string>
+    <string name="immersive_label">full screen: </string>
     <string name="model_label">model: </string>
-    <string name="default_ms">xx ms</string>
-    <string name="default_frame_size">height x width</string>
+    <string name="detect_count_label">detected: </string>
+    <string name="default_ms">-- ms</string>
+    <string name="default_frame_size">--</string>
+    <string name="default_zero">0</string>
     <string name="on">on</string>
     <string name="off">off</string>
+    <string name="detection_overlay_desc">Detection result overlay</string>
+    <string name="switch_camera_desc">Switch camera</string>
+    <string name="screenshot_desc">Take screenshot</string>
 
     <string-array name="model">
         <item>crowdhuman</item>
