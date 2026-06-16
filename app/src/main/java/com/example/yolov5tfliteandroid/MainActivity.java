@@ -2,6 +2,7 @@ package com.example.yolov5tfliteandroid;
 
 import android.Manifest;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -12,6 +13,7 @@ import android.provider.MediaStore;
 import android.util.Log;
 import android.view.Surface;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.CompoundButton;
 import android.widget.ImageView;
@@ -52,7 +54,13 @@ public class MainActivity extends AppCompatActivity {
     private CameraProcess cameraProcess = new CameraProcess();
 
     protected int getScreenOrientation() {
-        switch (getWindowManager().getDefaultDisplay().getRotation()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return getWindowManager().getDefaultDisplay().getRotation();
+        }
+        WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        @SuppressWarnings("deprecation")
+        int rotation = wm.getDefaultDisplay().getRotation();
+        switch (rotation) {
             case Surface.ROTATION_270: return 270;
             case Surface.ROTATION_180: return 180;
             case Surface.ROTATION_90: return 90;

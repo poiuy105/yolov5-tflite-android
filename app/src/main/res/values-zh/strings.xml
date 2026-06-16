@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">人群人体检测</string>
+    <string name="inference_time_label">推理耗时: </string>
+    <string name="frame_size_label">帧大小: </string>
+    <string name="immersive_label">全屏模式: </string>
+    <string name="model_label">模型: </string>
+    <string name="detect_count_label">检测数量: </string>
+    <string name="default_ms">-- ms</string>
+    <string name="default_frame_size">--</string>
+    <string name="default_zero">0</string>
+    <string name="on">开</string>
+    <string name="off">关</string>
+    <string name="detection_overlay_desc">检测结果叠加层</string>
+    <string name="switch_camera_desc">切换摄像头</string>
+    <string name="screenshot_desc">截图保存</string>
+</resources>
