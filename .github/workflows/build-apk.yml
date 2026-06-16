@@ -28,12 +28,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up JDK 11 for Gradle
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
       - name: Download CrowdHuman TFLite model
         run: |
           wget -q --show-progress \
@@ -54,9 +48,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build APK with Gradle
-        run: |
-          export JAVA_HOME=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/11.0.31-11/x64
-          ./gradlew assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: List build outputs
         run: |
@@ -103,7 +95,7 @@ jobs:
             - Use the dropdown to switch between models
 
             ### Requirements
-            - Android 5.0+ (API 21+)
+            - Android 7.0+ (API 24+)
             - Camera permission
           files: app/build/outputs/apk/debug/*.apk
           draft: false

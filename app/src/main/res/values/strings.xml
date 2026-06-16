@@ -1,10 +1,18 @@
 <resources>
-    <string name="app_name">yolov5-tflite</string>
+    <string name="app_name">CrowdHuman Person Detector</string>
+    <string name="inference_time_label">inference time: </string>
+    <string name="frame_size_label">Frame size: </string>
+    <string name="immersive_label">immersive: </string>
+    <string name="model_label">model: </string>
+    <string name="default_ms">xx ms</string>
+    <string name="default_frame_size">height x width</string>
+    <string name="on">on</string>
+    <string name="off">off</string>
 
     <string-array name="model">
         <item>crowdhuman</item>
         <item>yolov5s</item>
-        <item>yolov5n </item>
+        <item>yolov5n</item>
         <item>yolov5m</item>
         <item>yolov5s-int8</item>
     </string-array>
