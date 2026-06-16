@@ -2,6 +2,7 @@
     <string name="app_name">yolov5-tflite</string>
 
     <string-array name="model">
+        <item>crowdhuman</item>
         <item>yolov5s</item>
         <item>yolov5n </item>
         <item>yolov5m</item>

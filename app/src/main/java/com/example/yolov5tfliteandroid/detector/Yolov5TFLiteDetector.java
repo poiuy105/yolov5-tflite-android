@@ -56,7 +56,9 @@ public class Yolov5TFLiteDetector {
     private final String MODEL_YOLOV5N =  "yolov5n-fp16-320.tflite";
     private final String MODEL_YOLOV5M = "yolov5m-fp16-320.tflite";
     private final String MODEL_YOLOV5S_INT8 = "yolov5s-int8-320.tflite";
+    private final String MODEL_CROWDHUMAN = "crowdhuman_vbody_yolov5m.tflite";
     private final String LABEL_FILE = "coco_label.txt";
+    private final String PERSON_LABEL_FILE = "person_label.txt";
     MetadataExtractor.QuantizationParams input5SINT8QuantParams = new MetadataExtractor.QuantizationParams(0.003921568859368563f, 0);
     MetadataExtractor.QuantizationParams output5SINT8QuantParams = new MetadataExtractor.QuantizationParams(0.006305381190031767f, 5);
     private String MODEL_FILE;
@@ -69,26 +71,37 @@ public class Yolov5TFLiteDetector {
         return this.MODEL_FILE;
     }
 
+    private String currentLabelFile = LABEL_FILE;
+
     public void setModelFile(String modelFile){
         switch (modelFile) {
             case "yolov5s":
                 IS_INT8 = false;
                 MODEL_FILE = MODEL_YOLOV5S;
+                currentLabelFile = LABEL_FILE;
                 break;
             case "yolov5n":
                 IS_INT8 = false;
                 MODEL_FILE = MODEL_YOLOV5N;
+                currentLabelFile = LABEL_FILE;
                 break;
             case "yolov5m":
                 IS_INT8 = false;
                 MODEL_FILE = MODEL_YOLOV5M;
+                currentLabelFile = LABEL_FILE;
                 break;
             case "yolov5s-int8":
                 IS_INT8 = true;
                 MODEL_FILE = MODEL_YOLOV5S_INT8;
+                currentLabelFile = LABEL_FILE;
+                break;
+            case "crowdhuman":
+                IS_INT8 = false;
+                MODEL_FILE = MODEL_CROWDHUMAN;
+                currentLabelFile = PERSON_LABEL_FILE;
                 break;
             default:
-                Log.i("tfliteSupport", "Only yolov5s/n/m/sint8 can be load!");
+                Log.i("tfliteSupport", "Only yolov5s/n/m/sint8/crowdhuman can be load!");
         }
     }
 
@@ -112,8 +125,8 @@ public class Yolov5TFLiteDetector {
             tflite = new Interpreter(tfliteModel, options);
             Log.i("tfliteSupport", "Success reading model: " + MODEL_FILE);
 
-            associatedAxisLabels = FileUtil.loadLabels(activity, LABEL_FILE);
-            Log.i("tfliteSupport", "Success reading label: " + LABEL_FILE);
+            associatedAxisLabels = FileUtil.loadLabels(activity, currentLabelFile);
+            Log.i("tfliteSupport", "Success reading label: " + currentLabelFile);
 
         } catch (IOException e) {
             Log.e("tfliteSupport", "Error reading model or label: ", e);
