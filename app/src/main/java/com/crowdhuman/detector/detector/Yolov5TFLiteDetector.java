@@ -37,7 +37,8 @@ import java.util.Map;
 
 public class Yolov5TFLiteDetector {
 
-    private static final Size INPUT_SIZE = new Size(320, 320);
+    private static final Size DEFAULT_INPUT_SIZE = new Size(320, 320);
+    private Size inputSize; // Dynamic, set from model tensor shape
     private static final float DETECT_THRESHOLD = 0.25f;
     private static final float IOU_THRESHOLD = 0.45f;
     private static final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
@@ -74,6 +75,7 @@ public class Yolov5TFLiteDetector {
 
     public Yolov5TFLiteDetector() {
         this.nmsProcessor = new NmsProcessor(DETECT_THRESHOLD, IOU_THRESHOLD);
+        this.inputSize = DEFAULT_INPUT_SIZE;
     }
 
     /**
@@ -86,15 +88,15 @@ public class Yolov5TFLiteDetector {
             return false;
         }
         this.currentConfig = config;
-        // P1-10 FIX: Dynamically calculate anchor count based on INPUT_SIZE
-        int anchorCount = calculateAnchorCount(INPUT_SIZE.getWidth());
+        // P1-10 FIX: Dynamically calculate anchor count based on input size
+        int anchorCount = calculateAnchorCount(inputSize.getWidth());
         this.outputSize = new int[]{1, anchorCount, 5 + config.numClasses};
         return true;
     }
 
     public String getModelFile() { return currentConfig != null ? currentConfig.modelFile : null; }
     public String getModelKey() { return currentConfig != null ? currentConfig.key : null; }
-    public Size getInputSize() { return INPUT_SIZE; }
+    public Size getInputSize() { return inputSize; }
     public int[] getOutputSize() { return outputSize; }
     public int getNumClasses() { return currentConfig != null ? currentConfig.numClasses : 0; }
 
@@ -114,7 +116,22 @@ public class Yolov5TFLiteDetector {
 
             ByteBuffer tfliteModel = FileUtil.loadMappedFile(context, currentConfig.modelFile);
             tflite = new Interpreter(tfliteModel, options);
-            Log.i("tfliteSupport", "Model loaded: " + currentConfig.modelFile);
+
+            // FIX: Read actual input size from model tensor shape
+            int inputTensorIdx = tflite.getInputTensor(0).shape().length - 1; // height
+            int inputTensorWIdx = tflite.getInputTensor(0).shape().length - 2; // width
+            int modelH = (int) tflite.getInputTensor(0).shape()[inputTensorIdx];
+            int modelW = (int) tflite.getInputTensor(0).shape()[inputTensorWIdx];
+            this.inputSize = new Size(modelW, modelH);
+
+            // Recalculate outputSize with actual input dimensions
+            int anchorCount = calculateAnchorCount(modelW);
+            this.outputSize = new int[]{1, anchorCount, 5 + currentConfig.numClasses};
+
+            Log.i("tfliteSupport", "Model loaded: " + currentConfig.modelFile
+                    + ", inputSize=" + modelW + "x" + modelH
+                    + ", outputSize=" + Arrays.toString(outputSize)
+                    + ", anchors=" + anchorCount);
 
             associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
             Log.i("tfliteSupport", "Labels loaded: " + currentConfig.labelFile
@@ -179,7 +196,7 @@ public class Yolov5TFLiteDetector {
 
     private TensorImage preprocessImage(Bitmap bitmap) {
         ImageProcessor.Builder builder = new ImageProcessor.Builder()
-                .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
+                .add(new ResizeOp(inputSize.getHeight(), inputSize.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
                 .add(new NormalizeOp(0, 255));
 
         if (currentConfig.isInt8) {
@@ -199,14 +216,14 @@ public class Yolov5TFLiteDetector {
         ArrayList<Recognition> results = new ArrayList<>();
         for (int i = 0; i < outputSize[1]; i++) {
             int stride = i * outputSize[2];
-            float x = data[0 + stride] * INPUT_SIZE.getWidth();
-            float y = data[1 + stride] * INPUT_SIZE.getHeight();
-            float w = data[2 + stride] * INPUT_SIZE.getWidth();
-            float h = data[3 + stride] * INPUT_SIZE.getHeight();
+            float x = data[0 + stride] * inputSize.getWidth();
+            float y = data[1 + stride] * inputSize.getHeight();
+            float w = data[2 + stride] * inputSize.getWidth();
+            float h = data[3 + stride] * inputSize.getHeight();
             int xmin = (int) Math.max(0, x - w / 2);
             int ymin = (int) Math.max(0, y - h / 2);
-            int xmax = (int) Math.min(INPUT_SIZE.getWidth(), x + w / 2);
-            int ymax = (int) Math.min(INPUT_SIZE.getHeight(), y + h / 2);
+            int xmax = (int) Math.min(inputSize.getWidth(), x + w / 2);
+            int ymax = (int) Math.min(inputSize.getHeight(), y + h / 2);
             float confidence = data[4 + stride];
 
             float[] classScores = Arrays.copyOfRange(data, 5 + stride, outputSize[2] + stride);
