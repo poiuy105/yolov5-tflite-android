@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
     private static final String DEFAULT_MODEL = "crowdhuman";
 
-    private boolean isFullScreen = false;
+    private boolean isFullScreen = true; // Default: full screen
     private boolean isSpinnerInitialized = false;
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
@@ -46,7 +46,6 @@ public class MainActivity extends AppCompatActivity {
 
     // Views
     private PreviewView cameraPreviewMatch;
-    private PreviewView cameraPreviewWrap;
     private ImageView boxLabelCanvas;
     private Spinner modelSpinner;
     private com.google.android.material.switchmaterial.SwitchMaterial immersiveSwitch;
@@ -91,7 +90,6 @@ public class MainActivity extends AppCompatActivity {
     private void bindViews() {
         cameraPreviewMatch = findViewById(R.id.camera_preview_match);
         cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FILL_START);
-        cameraPreviewWrap = findViewById(R.id.camera_preview_wrap);
         boxLabelCanvas = findViewById(R.id.box_label_canvas);
         modelSpinner = findViewById(R.id.model);
         immersiveSwitch = findViewById(R.id.immersive);
@@ -122,7 +120,9 @@ public class MainActivity extends AppCompatActivity {
         });
 
         immersiveSwitch.setOnCheckedChangeListener((btn, checked) -> {
-            isFullScreen = checked;
+            // checked=true: keep original aspect ratio (with black bars)
+            // checked=false: full screen fill (default)
+            isFullScreen = !checked;
             startCameraWithCurrentMode();
         });
 
@@ -199,15 +199,20 @@ public class MainActivity extends AppCompatActivity {
         if (currentAnalyser != null) currentAnalyser.dispose();
 
         int rotation = DisplayUtils.getScreenOrientation(this);
+
+        // Set preview scale type based on full screen mode
+        if (isFullScreen) {
+            cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FILL_START);
+        } else {
+            cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FIT_CENTER);
+        }
+
         currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation,
                 detector, isFullScreen, cameraProcess.isFrontCamera());
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
             public void onResult(AnalyseResult result) {
                 if (result.resultBitmap != null) {
-                    // P0-1 FIX: Don't recycle the bitmap ImageView is displaying.
-                    // setImageBitmap will let the system handle the old bitmap.
-                    // We only recycle the previous result bitmap if it was NOT set to ImageView.
                     boxLabelCanvas.setImageBitmap(result.resultBitmap);
                 }
                 frameSizeTextView.setText(result.frameHeight + "x" + result.frameWidth);
@@ -222,22 +227,13 @@ public class MainActivity extends AppCompatActivity {
         });
 
         CameraProcess.CameraErrorCallback errCb = msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-        // P1-12 FIX: Don't call removeAllViews() on PreviewView - it destroys internal Surface
-        // Just start camera on the target preview view
-        if (isFullScreen) {
-            cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
-        } else {
-            cameraProcess.startCamera(this, currentAnalyser, cameraPreviewWrap, errCb);
-        }
+        // Use cameraPreviewMatch for both modes, scale type controls the display
+        cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
     }
 
     private void takeScreenshot() {
         // Merge camera preview + detection overlay
-        // P1-8 FIX: getBitmap() may return null, check both preview views
         Bitmap cameraBmp = cameraPreviewMatch.getBitmap();
-        if (cameraBmp == null) {
-            cameraBmp = cameraPreviewWrap.getBitmap();
-        }
         Drawable overlay = boxLabelCanvas.getDrawable();
         if (cameraBmp == null || !(overlay instanceof BitmapDrawable)) {
             Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show();
