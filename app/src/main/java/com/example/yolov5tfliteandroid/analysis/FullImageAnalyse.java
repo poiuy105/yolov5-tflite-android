@@ -99,7 +99,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     pooledRgbBytes = new int[imgH * imgW];
                 }
                 imageProcess.YUV420ToARGB8888(yuvBytes[0], yuvBytes[1], yuvBytes[2],
-                        imgW, imgH, yRowStride, uvRowStride, uvPixelStride, rgbBytes);
+                        imgW, imgH, yRowStride, uvRowStride, uvPixelStride, pooledRgbBytes);
 
                 // Reuse or create imageBitmap
                 if (pooledImageBitmap == null || pooledImageBitmap.getWidth() != imgW || pooledImageBitmap.getHeight() != imgH) {
