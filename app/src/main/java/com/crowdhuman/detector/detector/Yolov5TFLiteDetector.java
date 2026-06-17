@@ -219,7 +219,12 @@ public class Yolov5TFLiteDetector {
                 }
             }
 
-            results.add(new Recognition(labelId, "", maxScore, confidence,
+            // FIX: For single-class models (like CrowdHuman), use confidence as labelScore
+            // because the model may output class_score differently than multi-class models.
+            // For multi-class models, labelScore = confidence * maxClassScore is correct.
+            float labelScore = currentConfig.numClasses == 1 ? confidence : confidence * maxScore;
+
+            results.add(new Recognition(labelId, "", labelScore, confidence,
                     new RectF(xmin, ymin, xmax, ymax)));
         }
         return results;
