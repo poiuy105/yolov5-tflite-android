@@ -39,6 +39,11 @@ public class ScreenshotUtils {
         } catch (Exception e) {
             Log.e("ScreenshotUtils", "Failed to save: " + e.getMessage(), e);
             if (callback != null) callback.onError(e.getMessage());
+        } finally {
+            // P2-13 FIX: Recycle the bitmap after saving to free memory
+            if (bitmap != null && !bitmap.isRecycled()) {
+                bitmap.recycle();
+            }
         }
     }
 }

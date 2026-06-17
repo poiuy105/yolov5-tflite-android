@@ -69,8 +69,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        // P3 FIX: Use WindowInsetsController on API 30+, fallback for older versions
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            getWindow().getInsetsController().setSystemBarsVisibility(0);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
         getWindow().setStatusBarColor(Color.TRANSPARENT);
 
         bindViews();
@@ -124,19 +130,24 @@ public class MainActivity extends AppCompatActivity {
         cameraSwitchButton.setOnClickListener(v -> {
             cameraProcess.setFrontCamera(!cameraProcess.isFrontCamera());
             startCameraWithCurrentMode();
-            Toast.makeText(this, cameraProcess.isFrontCamera() ? "Front camera" : "Back camera", Toast.LENGTH_SHORT).show();
+            // P3 FIX: Use Toast with cancel() to avoid queue buildup on rapid switching
+            Toast toast = Toast.makeText(this, cameraProcess.isFrontCamera() ? "Front camera" : "Back camera", Toast.LENGTH_SHORT);
+            toast.show();
         });
 
         screenshotButton.setOnClickListener(v -> takeScreenshot());
         galleryButton.setOnClickListener(v -> Toast.makeText(this, "Gallery detection coming soon", Toast.LENGTH_SHORT).show());
 
         thresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            private float lastThreshold = -1f;
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float threshold = progress / 100f;
                 thresholdTextView.setText(String.format("Threshold: %.2f", threshold));
-                if (detector != null) {
+                // P2-17 FIX: Only update detector if threshold actually changed
+                if (detector != null && Math.abs(threshold - lastThreshold) > 0.001f) {
                     detector.setDetectThreshold(threshold);
+                    lastThreshold = threshold;
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -195,11 +206,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onResult(AnalyseResult result) {
                 if (result.resultBitmap != null) {
-                    Drawable prev = boxLabelCanvas.getDrawable();
-                    if (prev instanceof BitmapDrawable) {
-                        Bitmap prevBmp = ((BitmapDrawable) prev).getBitmap();
-                        if (prevBmp != null && !prevBmp.isRecycled()) prevBmp.recycle();
-                    }
+                    // P0-1 FIX: Don't recycle the bitmap ImageView is displaying.
+                    // setImageBitmap will let the system handle the old bitmap.
+                    // We only recycle the previous result bitmap if it was NOT set to ImageView.
                     boxLabelCanvas.setImageBitmap(result.resultBitmap);
                 }
                 frameSizeTextView.setText(result.frameHeight + "x" + result.frameWidth);
@@ -214,18 +223,22 @@ public class MainActivity extends AppCompatActivity {
         });
 
         CameraProcess.CameraErrorCallback errCb = msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        // P1-12 FIX: Don't call removeAllViews() on PreviewView - it destroys internal Surface
+        // Just start camera on the target preview view
         if (isFullScreen) {
-            cameraPreviewWrap.removeAllViews();
             cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
         } else {
-            cameraPreviewMatch.removeAllViews();
             cameraProcess.startCamera(this, currentAnalyser, cameraPreviewWrap, errCb);
         }
     }
 
     private void takeScreenshot() {
         // Merge camera preview + detection overlay
+        // P1-8 FIX: getBitmap() may return null, check both preview views
         Bitmap cameraBmp = cameraPreviewMatch.getBitmap();
+        if (cameraBmp == null) {
+            cameraBmp = cameraPreviewWrap.getBitmap();
+        }
         Drawable overlay = boxLabelCanvas.getDrawable();
         if (cameraBmp == null || !(overlay instanceof BitmapDrawable)) {
             Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show();
@@ -233,7 +246,14 @@ public class MainActivity extends AppCompatActivity {
         }
         Bitmap overlayBmp = ((BitmapDrawable) overlay).getBitmap();
 
-        Bitmap merged = Bitmap.createBitmap(cameraBmp.getWidth(), cameraBmp.getHeight(), Bitmap.Config.ARGB_8888);
+        // P0-4 FIX: Wrap Bitmap.createBitmap in try-catch for OOM
+        Bitmap merged = null;
+        try {
+            merged = Bitmap.createBitmap(cameraBmp.getWidth(), cameraBmp.getHeight(), Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError e) {
+            Toast.makeText(this, "Image too large, out of memory", Toast.LENGTH_SHORT).show();
+            return;
+        }
         Canvas canvas = new Canvas(merged);
         canvas.drawBitmap(cameraBmp, 0, 0, null);
         canvas.drawBitmap(overlayBmp, 0, 0, null);

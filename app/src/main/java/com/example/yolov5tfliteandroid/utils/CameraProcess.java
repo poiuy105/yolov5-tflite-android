@@ -68,7 +68,12 @@ public class CameraProcess {
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
                 cameraProvider.unbindAll();
-                cameraProvider.bindToLifecycle((LifecycleOwner) context, selector, imageAnalysis, preview);
+                // P1-11 FIX: Check if context is LifecycleOwner before casting
+                if (context instanceof LifecycleOwner) {
+                    cameraProvider.bindToLifecycle((LifecycleOwner) context, selector, imageAnalysis, preview);
+                } else {
+                    throw new IllegalArgumentException("Context must be a LifecycleOwner");
+                }
 
             } catch (ExecutionException | InterruptedException e) {
                 Log.e("CameraProcess", "Failed to start camera: " + e.getMessage(), e);

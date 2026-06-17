@@ -41,6 +41,11 @@ public class Yolov5TFLiteDetector {
     private static final float DETECT_THRESHOLD = 0.25f;
     private static final float IOU_THRESHOLD = 0.45f;
     private static final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
+    // P1-10 FIX: Calculate anchor count from input size instead of hardcoding
+    // YOLOv5 uses 3 scales with stride [8, 16, 32]
+    // For 320x320: (320/8)^2 + (320/16)^2 + (320/32)^2 = 1600 + 400 + 100 = 2100 per anchor
+    // With 3 anchors per scale: 2100 * 3 = 6300
+    // Formula: sum((input_size / stride)^2) * 3
     private static final MetadataExtractor.QuantizationParams INPUT_INT8_QUANT =
             new MetadataExtractor.QuantizationParams(0.003921568859368563f, 0);
     private static final MetadataExtractor.QuantizationParams OUTPUT_INT8_QUANT =
@@ -64,6 +69,8 @@ public class Yolov5TFLiteDetector {
     private ModelConfig currentConfig;
     private int[] outputSize;
     private final NmsProcessor nmsProcessor;
+    // P2-14 FIX: Reuse TensorProcessor for INT8 models
+    private TensorProcessor int8TensorProcessor;
 
     public Yolov5TFLiteDetector() {
         this.nmsProcessor = new NmsProcessor(DETECT_THRESHOLD, IOU_THRESHOLD);
@@ -79,7 +86,9 @@ public class Yolov5TFLiteDetector {
             return false;
         }
         this.currentConfig = config;
-        this.outputSize = new int[]{1, 6300, 5 + config.numClasses};
+        // P1-10 FIX: Dynamically calculate anchor count based on INPUT_SIZE
+        int anchorCount = calculateAnchorCount(INPUT_SIZE.getWidth());
+        this.outputSize = new int[]{1, anchorCount, 5 + config.numClasses};
         return true;
     }
 
@@ -114,7 +123,7 @@ public class Yolov5TFLiteDetector {
 
             if (callback != null) callback.onModelLoaded(currentConfig.modelFile);
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             Log.e("tfliteSupport", "Error loading model: ", e);
             if (callback != null) callback.onModelError("Failed to load " + currentConfig.modelFile + ": " + e.getMessage());
         }
@@ -145,11 +154,14 @@ public class Yolov5TFLiteDetector {
         tflite.run(input.getBuffer(), outputBuffer.getBuffer());
 
         // Post-process INT8 if needed
+        // P2-14 FIX: Reuse TensorProcessor instead of creating new one each detect
         if (currentConfig.isInt8) {
-            TensorProcessor tp = new TensorProcessor.Builder()
-                    .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
-                    .build();
-            outputBuffer = tp.process(outputBuffer);
+            if (int8TensorProcessor == null) {
+                int8TensorProcessor = new TensorProcessor.Builder()
+                        .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
+                        .build();
+            }
+            outputBuffer = int8TensorProcessor.process(outputBuffer);
         }
 
         // Decode output
@@ -252,5 +264,19 @@ public class Yolov5TFLiteDetector {
 
     public float getDetectThreshold() {
         return nmsProcessor.getDetectThreshold();
+    }
+
+    /**
+     * P1-10 FIX: Calculate YOLOv5 anchor count from input size.
+     * YOLOv5 uses 3 scales with strides [8, 16, 32] and 3 anchors per scale.
+     */
+    private static int calculateAnchorCount(int inputSize) {
+        int[] strides = {8, 16, 32};
+        int total = 0;
+        for (int stride : strides) {
+            int grid = inputSize / stride;
+            total += grid * grid;
+        }
+        return total * 3; // 3 anchors per scale
     }
 }

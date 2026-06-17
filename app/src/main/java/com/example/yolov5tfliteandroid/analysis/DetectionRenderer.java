@@ -59,7 +59,8 @@ public class DetectionRenderer {
         Canvas canvas = new Canvas(bitmap);
 
         for (Recognition res : recognitions) {
-            RectF location = res.getLocation();
+            // P1-7 FIX: Copy location to avoid mutating the original Recognition object
+            RectF location = new RectF(res.getLocation());
             String label = res.getLabelName();
             float confidence = res.getConfidence();
             modelToPreviewTransform.mapRect(location);

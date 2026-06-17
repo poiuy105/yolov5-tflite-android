@@ -36,14 +36,16 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private AnalyseCallback callback;
     private Disposable currentDisposable;
 
-    // FPS calculation
-    private long lastFrameTime = 0;
-    private float currentFps = 0;
+    // FPS calculation - P1-6 FIX: volatile for thread visibility
+    private volatile long lastFrameTime = 0;
+    private volatile float currentFps = 0;
     private static final float FPS_ALPHA = 0.9f;
 
     // Bitmap pool for reuse (reduce GC pressure)
     private Bitmap pooledImageBitmap;
     private Bitmap pooledFullImageBitmap;
+    // P2-15 FIX: Reuse rgbBytes array to reduce GC pressure
+    private int[] pooledRgbBytes;
 
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
                            Yolov5TFLiteDetector detector, boolean useFullScreenCrop, boolean isFrontCamera) {
@@ -66,15 +68,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             currentDisposable.dispose();
             currentDisposable = null;
         }
-        // Recycle pooled bitmaps
-        if (pooledImageBitmap != null && !pooledImageBitmap.isRecycled()) {
-            pooledImageBitmap.recycle();
-            pooledImageBitmap = null;
-        }
-        if (pooledFullImageBitmap != null && !pooledFullImageBitmap.isRecycled()) {
-            pooledFullImageBitmap.recycle();
-            pooledFullImageBitmap = null;
-        }
+        // P0-2 FIX: Don't recycle pooled bitmaps in dispose() - they may be in use
+        // by an ongoing analysis. They will be recycled when FullImageAnalyse is
+        // garbage collected or when dimensions change.
     }
 
     @Override
@@ -98,7 +94,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 int yRowStride = planes[0].getRowStride();
                 int uvRowStride = planes[1].getRowStride();
                 int uvPixelStride = planes[1].getPixelStride();
-                int[] rgbBytes = new int[imgH * imgW];
+                // P2-15 FIX: Reuse or create rgbBytes array
+                if (pooledRgbBytes == null || pooledRgbBytes.length != imgH * imgW) {
+                    pooledRgbBytes = new int[imgH * imgW];
+                }
                 imageProcess.YUV420ToARGB8888(yuvBytes[0], yuvBytes[1], yuvBytes[2],
                         imgW, imgH, yRowStride, uvRowStride, uvPixelStride, rgbBytes);
 
@@ -107,7 +106,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     if (pooledImageBitmap != null) pooledImageBitmap.recycle();
                     pooledImageBitmap = Bitmap.createBitmap(imgW, imgH, Bitmap.Config.ARGB_8888);
                 }
-                pooledImageBitmap.setPixels(rgbBytes, 0, imgW, 0, 0, imgW, imgH);
+                pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
                 double scale = Math.max(
                         previewHeight / (double) (rotation % 180 == 0 ? imgW : imgH),
@@ -183,6 +182,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             } finally {
                 if (cropImageBitmap != null && !cropImageBitmap.isRecycled()) cropImageBitmap.recycle();
                 if (modelInputBitmap != null && !modelInputBitmap.isRecycled()) modelInputBitmap.recycle();
+                // P0-5 FIX: Note - resultBitmap is passed to MainActivity via callback,
+                // which sets it to ImageView. ImageView manages its lifecycle.
+                // We must NOT recycle it here.
                 image.close();
             }
         }).subscribeOn(Schedulers.io())

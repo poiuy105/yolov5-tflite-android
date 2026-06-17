@@ -43,7 +43,8 @@ public class NmsProcessor {
     private ArrayList<Recognition> filterByClass(ArrayList<Recognition> recognitions, int classId) {
         ArrayList<Recognition> filtered = new ArrayList<>();
         for (Recognition r : recognitions) {
-            if (r.getLabelId() == classId && r.getConfidence() > detectThreshold) {
+            // P1-9 FIX: Use labelScore (objness * class_prob) instead of confidence (objness only)
+            if (r.getLabelId() == classId && r.getLabelScore() > detectThreshold) {
                 filtered.add(r);
             }
         }
