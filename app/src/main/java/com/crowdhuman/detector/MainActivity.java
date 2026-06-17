@@ -123,7 +123,9 @@ public class MainActivity extends AppCompatActivity {
             // checked=true: keep original aspect ratio (with black bars)
             // checked=false: full screen fill (default)
             isFullScreen = !checked;
-            startCameraWithCurrentMode();
+            // Only change scale type, do NOT restart camera
+            cameraPreviewMatch.setScaleType(
+                    isFullScreen ? PreviewView.ScaleType.FILL_START : PreviewView.ScaleType.FIT_CENTER);
         });
 
         cameraSwitchButton.setOnClickListener(v -> {
@@ -201,11 +203,8 @@ public class MainActivity extends AppCompatActivity {
         int rotation = DisplayUtils.getScreenOrientation(this);
 
         // Set preview scale type based on full screen mode
-        if (isFullScreen) {
-            cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FILL_START);
-        } else {
-            cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FIT_CENTER);
-        }
+        cameraPreviewMatch.setScaleType(
+                isFullScreen ? PreviewView.ScaleType.FILL_START : PreviewView.ScaleType.FIT_CENTER);
 
         currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation,
                 detector, isFullScreen, cameraProcess.isFrontCamera());
@@ -227,7 +226,6 @@ public class MainActivity extends AppCompatActivity {
         });
 
         CameraProcess.CameraErrorCallback errCb = msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-        // Use cameraPreviewMatch for both modes, scale type controls the display
         cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
     }
 
