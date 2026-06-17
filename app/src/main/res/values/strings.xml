@@ -5,14 +5,18 @@
     <string name="immersive_label">full screen: </string>
     <string name="model_label">model: </string>
     <string name="detect_count_label">detected: </string>
+    <string name="threshold_label">threshold: </string>
     <string name="default_ms">-- ms</string>
     <string name="default_frame_size">--</string>
     <string name="default_zero">0</string>
+    <string name="default_threshold">Threshold: 0.25</string>
     <string name="on">on</string>
     <string name="off">off</string>
+    <string name="retry">Retry</string>
     <string name="detection_overlay_desc">Detection result overlay</string>
     <string name="switch_camera_desc">Switch camera</string>
     <string name="screenshot_desc">Take screenshot</string>
+    <string name="gallery_desc">Gallery detection</string>
 
     <string-array name="model">
         <item>crowdhuman</item>

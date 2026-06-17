@@ -2,12 +2,10 @@ package com.example.yolov5tfliteandroid.analysis;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Matrix;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.widget.ImageView;
 
 import androidx.annotation.NonNull;
 import androidx.camera.core.ImageAnalysis;
@@ -34,16 +32,27 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private final ImageProcess imageProcess;
     private final boolean useFullScreenCrop;
     private final DetectionRenderer renderer;
+    private final boolean isFrontCamera;
     private AnalyseCallback callback;
     private Disposable currentDisposable;
 
+    // FPS calculation
+    private long lastFrameTime = 0;
+    private float currentFps = 0;
+    private static final float FPS_ALPHA = 0.9f;
+
+    // Bitmap pool for reuse (reduce GC pressure)
+    private Bitmap pooledImageBitmap;
+    private Bitmap pooledFullImageBitmap;
+
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
-                           Yolov5TFLiteDetector detector, boolean useFullScreenCrop) {
+                           Yolov5TFLiteDetector detector, boolean useFullScreenCrop, boolean isFrontCamera) {
         this.previewView = previewView;
         this.rotation = rotation;
         this.detector = detector;
         this.imageProcess = new ImageProcess();
         this.useFullScreenCrop = useFullScreenCrop;
+        this.isFrontCamera = isFrontCamera;
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         this.renderer = new DetectionRenderer(dm.density);
     }
@@ -52,16 +61,19 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         this.callback = callback;
     }
 
-    public Bitmap takeScreenshot() {
-        ImageView canvas = null; // caller should hold reference externally
-        // Screenshot is now handled externally via AnalyseResult.resultBitmap
-        return null;
-    }
-
     public void dispose() {
         if (currentDisposable != null && !currentDisposable.isDisposed()) {
             currentDisposable.dispose();
             currentDisposable = null;
+        }
+        // Recycle pooled bitmaps
+        if (pooledImageBitmap != null && !pooledImageBitmap.isRecycled()) {
+            pooledImageBitmap.recycle();
+            pooledImageBitmap = null;
+        }
+        if (pooledFullImageBitmap != null && !pooledFullImageBitmap.isRecycled()) {
+            pooledFullImageBitmap.recycle();
+            pooledFullImageBitmap = null;
         }
     }
 
@@ -75,7 +87,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
         currentDisposable = Observable.create((ObservableEmitter<AnalyseResult> emitter) -> {
             long start = System.currentTimeMillis();
-            Bitmap imageBitmap = null, fullImageBitmap = null, cropImageBitmap = null, modelInputBitmap = null;
+            Bitmap cropImageBitmap = null;
+            Bitmap modelInputBitmap = null;
+
             try {
                 byte[][] yuvBytes = new byte[3][];
                 ImageProxy.PlaneProxy[] planes = image.getPlanes();
@@ -88,31 +102,51 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 imageProcess.YUV420ToARGB8888(yuvBytes[0], yuvBytes[1], yuvBytes[2],
                         imgW, imgH, yRowStride, uvRowStride, uvPixelStride, rgbBytes);
 
-                imageBitmap = Bitmap.createBitmap(imgW, imgH, Bitmap.Config.ARGB_8888);
-                imageBitmap.setPixels(rgbBytes, 0, imgW, 0, 0, imgW, imgH);
+                // Reuse or create imageBitmap
+                if (pooledImageBitmap == null || pooledImageBitmap.getWidth() != imgW || pooledImageBitmap.getHeight() != imgH) {
+                    if (pooledImageBitmap != null) pooledImageBitmap.recycle();
+                    pooledImageBitmap = Bitmap.createBitmap(imgW, imgH, Bitmap.Config.ARGB_8888);
+                }
+                pooledImageBitmap.setPixels(rgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
                 double scale = Math.max(
                         previewHeight / (double) (rotation % 180 == 0 ? imgW : imgH),
                         previewWidth / (double) (rotation % 180 == 0 ? imgH : imgW));
                 int scaledW = (int) (scale * imgH), scaledH = (int) (scale * imgW);
-                if (scaledW <= 0 || scaledH <= 0) { emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight)); return; }
+                if (scaledW <= 0 || scaledH <= 0) {
+                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
+                    return;
+                }
 
                 Matrix transform = imageProcess.getTransformationMatrix(imgW, imgH, scaledW, scaledH, rotation % 180 == 0 ? 90 : 0, false);
-                fullImageBitmap = Bitmap.createBitmap(imageBitmap, 0, 0, imgW, imgH, transform, false);
 
-                int cropW = Math.min(previewWidth, fullImageBitmap.getWidth());
-                int cropH = Math.min(previewHeight, fullImageBitmap.getHeight());
-                if (cropW <= 0 || cropH <= 0) { emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight)); return; }
+                // Reuse or create fullImageBitmap
+                if (pooledFullImageBitmap == null || pooledFullImageBitmap.getWidth() != scaledW || pooledFullImageBitmap.getHeight() != scaledH) {
+                    if (pooledFullImageBitmap != null) pooledFullImageBitmap.recycle();
+                    pooledFullImageBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888);
+                }
+                Canvas canvas = new Canvas(pooledFullImageBitmap);
+                canvas.drawBitmap(pooledImageBitmap, transform, null);
+
+                int cropW = Math.min(previewWidth, pooledFullImageBitmap.getWidth());
+                int cropH = Math.min(previewHeight, pooledFullImageBitmap.getHeight());
+                if (cropW <= 0 || cropH <= 0) {
+                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
+                    return;
+                }
 
                 if (useFullScreenCrop) {
-                    int offX = Math.max(0, (fullImageBitmap.getWidth() - previewWidth) / 2);
-                    int offY = Math.max(0, (fullImageBitmap.getHeight() - previewHeight) / 2);
-                    cropW = Math.min(cropW, fullImageBitmap.getWidth() - offX);
-                    cropH = Math.min(cropH, fullImageBitmap.getHeight() - offY);
-                    if (cropW <= 0 || cropH <= 0) { emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight)); return; }
-                    cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, offX, offY, cropW, cropH);
+                    int offX = Math.max(0, (pooledFullImageBitmap.getWidth() - previewWidth) / 2);
+                    int offY = Math.max(0, (pooledFullImageBitmap.getHeight() - previewHeight) / 2);
+                    cropW = Math.min(cropW, pooledFullImageBitmap.getWidth() - offX);
+                    cropH = Math.min(cropH, pooledFullImageBitmap.getHeight() - offY);
+                    if (cropW <= 0 || cropH <= 0) {
+                        emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
+                        return;
+                    }
+                    cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, offX, offY, cropW, cropH);
                 } else {
-                    cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, 0, 0, cropW, cropH);
+                    cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, cropW, cropH);
                 }
 
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
@@ -123,18 +157,30 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 Matrix modelToPreview = new Matrix();
                 try { previewToModel.invert(modelToPreview); }
-                catch (IllegalArgumentException e) { emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight)); return; }
+                catch (IllegalArgumentException e) {
+                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
+                    return;
+                }
 
                 ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
-                Bitmap resultBitmap = renderer.render(recognitions, previewWidth, previewHeight, modelToPreview);
-                emitter.onNext(new AnalyseResult(System.currentTimeMillis() - start, resultBitmap, recognitions.size(), previewWidth, previewHeight));
+
+                // Calculate FPS
+                long now = System.currentTimeMillis();
+                if (lastFrameTime > 0) {
+                    float instantFps = 1000f / (now - lastFrameTime);
+                    currentFps = FPS_ALPHA * currentFps + (1 - FPS_ALPHA) * instantFps;
+                }
+                lastFrameTime = now;
+
+                Bitmap resultBitmap = renderer.render(recognitions, previewWidth, previewHeight,
+                        modelToPreview, isFrontCamera, currentFps);
+                emitter.onNext(new AnalyseResult(now - start, resultBitmap, recognitions.size(),
+                        previewWidth, previewHeight, currentFps));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
-                emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight));
+                emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
             } finally {
-                if (imageBitmap != null && !imageBitmap.isRecycled()) imageBitmap.recycle();
-                if (fullImageBitmap != null && !fullImageBitmap.isRecycled()) fullImageBitmap.recycle();
                 if (cropImageBitmap != null && !cropImageBitmap.isRecycled()) cropImageBitmap.recycle();
                 if (modelInputBitmap != null && !modelInputBitmap.isRecycled()) modelInputBitmap.recycle();
                 image.close();

@@ -29,7 +29,52 @@
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintTop_toTopOf="parent"/>
 
-    <!-- Top toolbar: camera switch + screenshot -->
+    <!-- Loading indicator -->
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/loading_indicator"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:indicatorColor="@color/white"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent"/>
+
+    <!-- Error panel -->
+    <LinearLayout
+        android:id="@+id/error_panel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp"
+        android:background="@color/error_panel_bg"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent">
+
+        <TextView
+            android:id="@+id/error_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/white"
+            android:textSize="16sp"
+            android:gravity="center"
+            android:layout_marginBottom="16dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/retry_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/retry"
+            app:cornerRadius="8dp"/>
+    </LinearLayout>
+
+    <!-- Top toolbar: camera switch + screenshot + gallery -->
     <LinearLayout
         android:id="@+id/top_toolbar"
         android:layout_width="match_parent"
@@ -45,8 +90,8 @@
             android:layout_height="40dp"
             android:padding="8dp"
             android:contentDescription="@string/switch_camera_desc"
-            android:src="@android:drawable/ic_menu_camera"
-            android:background="@color/button_bg"
+            android:src="@drawable/ic_camera_switch"
+            android:background="@drawable/bg_circle_button"
             android:layout_marginEnd="8dp"/>
 
         <ImageView
@@ -55,10 +100,37 @@
             android:layout_height="40dp"
             android:padding="8dp"
             android:contentDescription="@string/screenshot_desc"
-            android:src="@android:drawable/ic_menu_save"
-            android:background="@color/button_bg"/>
+            android:src="@drawable/ic_screenshot"
+            android:background="@drawable/bg_circle_button"
+            android:layout_marginEnd="8dp"/>
+
+        <ImageView
+            android:id="@+id/gallery"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:contentDescription="@string/gallery_desc"
+            android:src="@drawable/ic_gallery"
+            android:background="@drawable/bg_circle_button"/>
 
     </LinearLayout>
+
+    <!-- FPS display -->
+    <TextView
+        android:id="@+id/fps_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/yellow"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:padding="8dp"
+        android:shadowColor="@color/black"
+        android:shadowRadius="2"
+        android:shadowDx="1"
+        android:shadowDy="1"
+        app:layout_constraintTop_toBottomOf="@id/top_toolbar"
+        app:layout_constraintRight_toRightOf="parent"
+        android:layout_marginEnd="12dp"/>
 
     <!-- Bottom control panel -->
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -70,14 +142,49 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintLeft_toLeftOf="parent">
 
+        <!-- Threshold row -->
+        <TextView
+            android:id="@+id/threshold_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintLeft_toLeftOf="parent"
+            android:layout_marginStart="8dp"
+            android:textColor="@color/white"
+            android:text="@string/threshold_label" />
+
+        <TextView
+            android:id="@+id/threshold_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintRight_toRightOf="parent"
+            android:layout_marginEnd="8dp"
+            android:textColor="@color/white"
+            android:text="@string/default_threshold" />
+
+        <SeekBar
+            android:id="@+id/threshold_seekbar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="25"
+            app:layout_constraintTop_toBottomOf="@id/threshold_label"
+            app:layout_constraintLeft_toLeftOf="parent"
+            app:layout_constraintRight_toRightOf="parent"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="8dp"/>
+
         <TextView
             android:id="@+id/detect_name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:layout_constraintBottom_toTopOf="@id/inference"
+            app:layout_constraintTop_toBottomOf="@id/threshold_seekbar"
             app:layout_constraintLeft_toLeftOf="parent"
             android:layout_marginStart="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:textColor="@color/white"
             android:text="@string/detect_count_label" />
 
@@ -85,10 +192,10 @@
             android:id="@+id/detect_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            app:layout_constraintTop_toBottomOf="@id/threshold_seekbar"
             app:layout_constraintRight_toRightOf="parent"
-            app:layout_constraintBottom_toTopOf="@id/inference_time"
             android:layout_marginEnd="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:text="@string/default_zero"
             android:textColor="@color/white" />
 
@@ -96,10 +203,10 @@
             android:id="@+id/inference"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/detect_name"
             app:layout_constraintLeft_toLeftOf="parent"
             android:layout_marginStart="8dp"
-            android:layout_marginBottom="8dp"
+            android:layout_marginTop="4dp"
             android:textColor="@color/white"
             android:text="@string/inference_time_label" />
 
@@ -107,10 +214,10 @@
             android:id="@+id/inference_time"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            app:layout_constraintTop_toBottomOf="@id/detect_count"
             app:layout_constraintRight_toRightOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
             android:layout_marginEnd="8dp"
-            android:layout_marginBottom="8dp"
+            android:layout_marginTop="4dp"
             android:text="@string/default_ms"
             android:textColor="@color/white" />
 
@@ -118,10 +225,10 @@
             android:id="@+id/frame"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:layout_constraintBottom_toTopOf="@id/inference"
+            app:layout_constraintTop_toBottomOf="@id/inference"
             app:layout_constraintLeft_toLeftOf="parent"
             android:layout_marginStart="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:textColor="@color/white"
             android:text="@string/frame_size_label" />
 
@@ -129,10 +236,10 @@
             android:id="@+id/frame_size"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            app:layout_constraintTop_toBottomOf="@id/inference_time"
             app:layout_constraintRight_toRightOf="parent"
-            app:layout_constraintBottom_toTopOf="@id/inference_time"
             android:layout_marginEnd="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:text="@string/default_frame_size"
             android:textColor="@color/white" />
 
@@ -141,10 +248,10 @@
             android:layout_width="wrap_content"
             android:layout_height="48dp"
             android:gravity="center_vertical"
-            app:layout_constraintBottom_toTopOf="@id/frame"
+            app:layout_constraintTop_toBottomOf="@id/frame"
             app:layout_constraintLeft_toLeftOf="parent"
             android:layout_marginStart="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:textColor="@color/white"
             android:labelFor="@+id/immersive"
             android:text="@string/immersive_label" />
@@ -157,20 +264,20 @@
             android:textOn="@string/on"
             android:textOff="@string/off"
             android:contentDescription="@string/immersive_label"
-            app:layout_constraintBottom_toTopOf="@id/frame_size"
+            app:layout_constraintTop_toBottomOf="@id/frame_size"
             app:layout_constraintRight_toRightOf="parent"
             android:layout_marginEnd="8dp"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginTop="4dp" />
 
         <TextView
             android:id="@+id/model_name"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
             android:gravity="center_vertical"
-            app:layout_constraintBottom_toTopOf="@id/immersive_name"
+            app:layout_constraintTop_toBottomOf="@id/immersive_name"
             app:layout_constraintLeft_toLeftOf="parent"
             android:layout_marginStart="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:textColor="@color/white"
             android:labelFor="@+id/model"
             android:text="@string/model_label" />
@@ -180,14 +287,14 @@
             android:layout_width="wrap_content"
             android:layout_height="48dp"
             android:minHeight="48dp"
-            app:layout_constraintBottom_toTopOf="@id/immersive"
+            app:layout_constraintTop_toBottomOf="@id/immersive"
             app:layout_constraintRight_toRightOf="parent"
             android:background="#00000000"
             android:entries="@array/model"
             android:padding="0dp"
             android:gravity="end"
             android:layout_marginEnd="8dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="4dp"
             android:contentDescription="@string/model_label" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>

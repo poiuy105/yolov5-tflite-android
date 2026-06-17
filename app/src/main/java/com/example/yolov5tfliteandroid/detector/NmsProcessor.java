@@ -1,17 +1,14 @@
 package com.example.yolov5tfliteandroid.detector;
 
 import android.graphics.RectF;
-import android.util.Log;
 
 import com.example.yolov5tfliteandroid.utils.Recognition;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.PriorityQueue;
 
 public class NmsProcessor {
 
-    private final float detectThreshold;
+    private float detectThreshold;
     private final float iouThreshold;
 
     public NmsProcessor(float detectThreshold, float iouThreshold) {
@@ -19,22 +16,19 @@ public class NmsProcessor {
         this.iouThreshold = iouThreshold;
     }
 
-    /**
-     * Single NMS method that handles both per-class and cross-class suppression.
-     * @param allRecognitions all raw detections
-     * @param numClasses number of classes for per-class NMS pass
-     * @param crossClassIouThreshold IOU threshold for cross-class deduplication (use -1 to skip)
-     * @return filtered recognitions
-     */
-    public ArrayList<Recognition> suppress(ArrayList<Recognition> allRecognitions, int numClasses, float crossClassIouThreshold) {
-        // Step 1: Per-class NMS
-        ArrayList<Recognition> perClassResult = perClassNms(allRecognitions, numClasses);
+    public void setDetectThreshold(float threshold) {
+        this.detectThreshold = threshold;
+    }
 
-        // Step 2: Optional cross-class NMS
+    public float getDetectThreshold() {
+        return detectThreshold;
+    }
+
+    public ArrayList<Recognition> suppress(ArrayList<Recognition> allRecognitions, int numClasses, float crossClassIouThreshold) {
+        ArrayList<Recognition> perClassResult = perClassNms(allRecognitions, numClasses);
         if (crossClassIouThreshold > 0) {
             perClassResult = singleNms(perClassResult, crossClassIouThreshold);
         }
-
         return perClassResult;
     }
 
@@ -60,7 +54,6 @@ public class NmsProcessor {
         ArrayList<Recognition> result = new ArrayList<>();
         if (candidates.isEmpty()) return result;
 
-        // Sort by confidence descending
         candidates.sort((a, b) -> Float.compare(b.getConfidence(), a.getConfidence()));
 
         boolean[] suppressed = new boolean[candidates.size()];
@@ -84,19 +77,14 @@ public class NmsProcessor {
     }
 
     private float boxIntersection(RectF a, RectF b) {
-        float maxLeft = Math.max(a.left, b.left);
-        float maxTop = Math.max(a.top, b.top);
-        float minRight = Math.min(a.right, b.right);
-        float minBottom = Math.min(a.bottom, b.bottom);
-        float w = minRight - maxLeft;
-        float h = minBottom - maxTop;
+        float w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        float h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         if (w < 0 || h < 0) return 0;
         return w * h;
     }
 
     private float boxUnion(RectF a, RectF b) {
         float i = boxIntersection(a, b);
-        float u = (a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - i;
-        return u;
+        return (a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - i;
     }
 }

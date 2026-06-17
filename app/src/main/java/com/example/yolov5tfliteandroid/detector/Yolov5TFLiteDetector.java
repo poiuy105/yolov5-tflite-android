@@ -242,4 +242,15 @@ public class Yolov5TFLiteDetector {
             options.addDelegate(nnApiDelegate);
         }
     }
+
+    /**
+     * Set detection confidence threshold dynamically.
+     */
+    public void setDetectThreshold(float threshold) {
+        nmsProcessor.setDetectThreshold(threshold);
+    }
+
+    public float getDetectThreshold() {
+        return nmsProcessor.getDetectThreshold();
+    }
 }
