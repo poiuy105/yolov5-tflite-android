@@ -72,7 +72,6 @@ public class MainActivity extends AppCompatActivity {
         // P3 FIX: Use WindowInsetsController on API 30+, fallback for older versions
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);
-            getWindow().getInsetsController().setSystemBarsVisibility(0);
         } else {
             getWindow().getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
