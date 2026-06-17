@@ -88,9 +88,7 @@ public class Yolov5TFLiteDetector {
             return false;
         }
         this.currentConfig = config;
-        // P1-10 FIX: Dynamically calculate anchor count based on input size
-        int anchorCount = calculateAnchorCount(inputSize.getWidth());
-        this.outputSize = new int[]{1, anchorCount, 5 + config.numClasses};
+        // outputSize will be calculated in initialModel() after reading actual tensor shape
         return true;
     }
 
@@ -151,14 +149,16 @@ public class Yolov5TFLiteDetector {
         if (gpuDelegate != null) { gpuDelegate.close(); gpuDelegate = null; }
         if (nnApiDelegate != null) { nnApiDelegate.close(); nnApiDelegate = null; }
         options = null;
+        // Reset inputSize to default so setModelFile() calculates correctly
+        this.inputSize = DEFAULT_INPUT_SIZE;
     }
 
     /**
      * LSP: Returns empty list if model not loaded (caller can check getModelFile() != null first).
      */
     public ArrayList<Recognition> detect(Bitmap bitmap) {
-        if (tflite == null || currentConfig == null) {
-            Log.e("tfliteSupport", "Interpreter is null, model not loaded!");
+        if (tflite == null || currentConfig == null || outputSize == null) {
+            Log.e("tfliteSupport", "Interpreter is null or outputSize not set, model not loaded!");
             return new ArrayList<>();
         }
 
@@ -236,12 +236,10 @@ public class Yolov5TFLiteDetector {
                 }
             }
 
-            // FIX: For single-class models (like CrowdHuman), use confidence as labelScore
-            // because the model may output class_score differently than multi-class models.
-            // For multi-class models, labelScore = confidence * maxClassScore is correct.
-            float labelScore = currentConfig.numClasses == 1 ? confidence : confidence * maxScore;
-
-            results.add(new Recognition(labelId, "", labelScore, confidence,
+            // YOLOv5 TFLite model output: confidence is already the objectness score.
+            // For detection threshold filtering, we use confidence directly.
+            // labelScore is used for NMS threshold comparison.
+            results.add(new Recognition(labelId, "", confidence, confidence,
                     new RectF(xmin, ymin, xmax, ymax)));
         }
         return results;
