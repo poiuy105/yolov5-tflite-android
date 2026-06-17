@@ -141,9 +141,9 @@ public class MainActivity extends AppCompatActivity {
             private float lastThreshold = -1f;
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                float threshold = progress / 100f;
+                float threshold = progress / 100.0f;
                 thresholdTextView.setText(String.format("Threshold: %.2f", threshold));
-                // P2-17 FIX: Only update detector if threshold actually changed
+                // FIX: Use 100.0f for float division, update detector when threshold changes
                 if (detector != null && Math.abs(threshold - lastThreshold) > 0.001f) {
                     detector.setDetectThreshold(threshold);
                     lastThreshold = threshold;
