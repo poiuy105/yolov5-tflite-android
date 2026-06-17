@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.detector;
+package com.crowdhuman.detector.detector;
 
 public interface DetectorCallback {
     void onModelLoaded(String modelFile);

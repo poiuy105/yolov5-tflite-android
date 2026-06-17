@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.analysis;
+package com.crowdhuman.detector.analysis;
 
 import android.graphics.Bitmap;
 

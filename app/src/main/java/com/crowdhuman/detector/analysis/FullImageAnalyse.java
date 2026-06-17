@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.analysis;
+package com.crowdhuman.detector.analysis;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -12,9 +12,9 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
-import com.example.yolov5tfliteandroid.detector.Yolov5TFLiteDetector;
-import com.example.yolov5tfliteandroid.utils.ImageProcess;
-import com.example.yolov5tfliteandroid.utils.Recognition;
+import com.crowdhuman.detector.detector.Yolov5TFLiteDetector;
+import com.crowdhuman.detector.utils.ImageProcess;
+import com.crowdhuman.detector.utils.Recognition;
 
 import java.util.ArrayList;
 

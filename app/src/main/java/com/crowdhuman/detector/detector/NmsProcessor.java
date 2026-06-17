@@ -1,8 +1,8 @@
-package com.example.yolov5tfliteandroid.detector;
+package com.crowdhuman.detector.detector;
 
 import android.graphics.RectF;
 
-import com.example.yolov5tfliteandroid.utils.Recognition;
+import com.crowdhuman.detector.utils.Recognition;
 
 import java.util.ArrayList;
 

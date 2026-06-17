@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.detector;
+package com.crowdhuman.detector.detector;
 
 public class ModelConfig {
     public final String key;

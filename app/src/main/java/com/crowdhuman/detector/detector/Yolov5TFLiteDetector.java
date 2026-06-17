@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.detector;
+package com.crowdhuman.detector.detector;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -7,7 +7,7 @@ import android.os.Build;
 import android.util.Log;
 import android.util.Size;
 
-import com.example.yolov5tfliteandroid.utils.Recognition;
+import com.crowdhuman.detector.utils.Recognition;
 
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;

@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.analysis;
+package com.crowdhuman.detector.analysis;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -8,7 +8,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 
-import com.example.yolov5tfliteandroid.utils.Recognition;
+import com.crowdhuman.detector.utils.Recognition;
 
 import java.util.ArrayList;
 import java.util.Locale;

@@ -14,13 +14,13 @@
 # RxJava
 -keep class io.reactivex.rxjava3.** { *; }
 
-# Keep model classes
--keep class com.example.yolov5tfliteandroid.detector.** { *; }
--keep class com.example.yolov5tfliteandroid.utils.** { *; }
--keep class com.example.yolov5tfliteandroid.analysis.** { *; }
+# Keep model classes (updated package name)
+-keep class com.crowdhuman.detector.detector.** { *; }
+-keep class com.crowdhuman.detector.utils.** { *; }
+-keep class com.crowdhuman.detector.analysis.** { *; }
 
-# Keep Recognition data class
--keepclassmembers class com.example.yolov5tfliteandroid.utils.Recognition {
+# Keep Recognition data class (updated package name)
+-keepclassmembers class com.crowdhuman.detector.utils.Recognition {
     <fields>;
     <methods>;
 }

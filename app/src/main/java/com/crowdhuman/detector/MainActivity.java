@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid;
+package com.crowdhuman.detector;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -22,14 +22,14 @@ import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.example.yolov5tfliteandroid.analysis.AnalyseCallback;
-import com.example.yolov5tfliteandroid.analysis.AnalyseResult;
-import com.example.yolov5tfliteandroid.analysis.FullImageAnalyse;
-import com.example.yolov5tfliteandroid.detector.DetectorCallback;
-import com.example.yolov5tfliteandroid.detector.Yolov5TFLiteDetector;
-import com.example.yolov5tfliteandroid.utils.CameraProcess;
-import com.example.yolov5tfliteandroid.utils.DisplayUtils;
-import com.example.yolov5tfliteandroid.utils.ScreenshotUtils;
+import com.crowdhuman.detector.analysis.AnalyseCallback;
+import com.crowdhuman.detector.analysis.AnalyseResult;
+import com.crowdhuman.detector.analysis.FullImageAnalyse;
+import com.crowdhuman.detector.detector.DetectorCallback;
+import com.crowdhuman.detector.detector.Yolov5TFLiteDetector;
+import com.crowdhuman.detector.utils.CameraProcess;
+import com.crowdhuman.detector.utils.DisplayUtils;
+import com.crowdhuman.detector.utils.ScreenshotUtils;
 import com.google.android.material.progressindicator.CircularProgressIndicator;
 
 public class MainActivity extends AppCompatActivity {

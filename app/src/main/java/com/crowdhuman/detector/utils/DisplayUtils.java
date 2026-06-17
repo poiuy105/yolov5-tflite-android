@@ -1,4 +1,4 @@
-package com.example.yolov5tfliteandroid.utils;
+package com.crowdhuman.detector.utils;
 
 import android.app.Activity;
 import android.content.Context;
