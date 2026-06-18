@@ -134,19 +134,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     return;
                 }
 
-                if (useFullScreenCrop) {
-                    int offX = Math.max(0, (pooledFullImageBitmap.getWidth() - previewWidth) / 2);
-                    int offY = Math.max(0, (pooledFullImageBitmap.getHeight() - previewHeight) / 2);
-                    cropW = Math.min(cropW, pooledFullImageBitmap.getWidth() - offX);
-                    cropH = Math.min(cropH, pooledFullImageBitmap.getHeight() - offY);
-                    if (cropW <= 0 || cropH <= 0) {
-                        emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
-                        return;
-                    }
-                    cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, offX, offY, cropW, cropH);
-                } else {
-                    cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, cropW, cropH);
-                }
+                // Always crop from (0,0) to match original logic.
+                // Center crop would require offset compensation in modelToPreview transform.
+                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, cropW, cropH);
 
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
                         cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
