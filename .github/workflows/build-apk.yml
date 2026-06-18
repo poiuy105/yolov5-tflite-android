@@ -1,4 +1,4 @@
-name: Build Android APK with CrowdHuman Model
+name: Build Android APK - Person Detector
 
 on:
   push:
@@ -28,28 +28,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Download CrowdHuman TFLite model
-        run: |
-          wget -q --show-progress \
-            -O app/src/main/assets/crowdhuman_vbody_yolov5m.tflite \
-            "https://github.com/poiuy105/crowdhuman-yolov5m-tflite/releases/download/v1.0.0-tflite/crowdhuman_vbody_yolov5m.tflite" || \
-          curl -fsSL \
-            -o app/src/main/assets/crowdhuman_vbody_yolov5m.tflite \
-            "https://github.com/poiuy105/crowdhuman-yolov5m-tflite/releases/download/v1.0.0-tflite/crowdhuman_vbody_yolov5m.tflite"
-          ls -lh app/src/main/assets/crowdhuman_vbody_yolov5m.tflite
-          FILE_SIZE=$(stat -c%s app/src/main/assets/crowdhuman_vbody_yolov5m.tflite)
-          echo "Model file size: $FILE_SIZE bytes"
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "ERROR: Downloaded model file is too small"
-            exit 1
-          fi
-
-      - name: Verify model file exists in assets
+      - name: Verify model files exist in assets
         run: |
           echo "=== Assets files ==="
           ls -lh app/src/main/assets/*.tflite
-          echo "=== Checking crowdhuman model ==="
-          test -f app/src/main/assets/crowdhuman_vbody_yolov5m.tflite && echo "OK: crowdhuman model exists" || { echo "FAIL: crowdhuman model missing!"; exit 1; }
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -70,14 +52,14 @@ jobs:
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crowdhuman-detector-debug
+          name: person-detector-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
       - name: Upload Release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crowdhuman-detector-release
+          name: person-detector-release
           path: app/build/outputs/apk/release/*.apk
           retention-days: 90
 
@@ -86,23 +68,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: "CrowdHuman Person Detector v1.0.${{ github.run_number }}"
+          name: "Person Detector v1.0.${{ github.run_number }}"
           body: |
-            ## CrowdHuman Person Detector - Android APK
+            ## Person Detector - Android APK
 
             ### Features
-            - Real-time person detection using YOLOv5m trained on CrowdHuman dataset
-            - Supports crowded scenes (back view, side view, partial occlusion)
+            - Real-time person detection using YOLOv5 (COCO person class)
             - Camera-based real-time detection with front/back camera switch
-            - Switch between CrowdHuman model and standard COCO models
-            - Detection count display
+            - Multiple model support: yolov5s, yolov5n, yolov5m, yolov5s-int8
+            - Adjustable detection threshold
+            - Detection count and FPS display
             - Screenshot save to gallery
-            - Full-screen / full-image display modes
+            - Full-screen / aspect-ratio display modes
 
             ### Model Info
-            - **Base model**: YOLOv5m
-            - **Training dataset**: CrowdHuman
-            - **Classes**: person (single class)
+            - **Base models**: YOLOv5s/n/m (320x320, FP16/INT8)
+            - **Detection class**: person only (COCO class 0)
             - **Input size**: 320x320 (optimized for mobile)
 
             ### Installation

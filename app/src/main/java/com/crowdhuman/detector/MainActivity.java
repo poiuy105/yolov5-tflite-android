@@ -36,7 +36,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
-    private static final String DEFAULT_MODEL = "crowdhuman";
+    private static final String DEFAULT_MODEL = "yolov5s";
 
     private boolean isFullScreen = true; // Default: full screen
     private boolean isSpinnerInitialized = false;
