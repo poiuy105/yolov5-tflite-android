@@ -115,21 +115,21 @@ public class Yolov5TFLiteDetector {
             ByteBuffer tfliteModel = FileUtil.loadMappedFile(context, currentConfig.modelFile);
             tflite = new Interpreter(tfliteModel, options);
 
-            // FIX: Read actual input size from model tensor shape
-            int inputTensorIdx = tflite.getInputTensor(0).shape().length - 1; // height
-            int inputTensorWIdx = tflite.getInputTensor(0).shape().length - 2; // width
-            int modelH = (int) tflite.getInputTensor(0).shape()[inputTensorIdx];
-            int modelW = (int) tflite.getInputTensor(0).shape()[inputTensorWIdx];
+            // Read actual input size from model tensor shape
+            int[] inputShape = tflite.getInputTensor(0).shape();
+            int modelH = inputShape[inputShape.length - 1];
+            int modelW = inputShape[inputShape.length - 2];
             this.inputSize = new Size(modelW, modelH);
 
-            // Recalculate outputSize with actual input dimensions
-            int anchorCount = calculateAnchorCount(modelW);
-            this.outputSize = new int[]{1, anchorCount, 5 + currentConfig.numClasses};
+            // Read actual output size from model output tensor shape (NOT calculated)
+            int[] outputShape = tflite.getOutputTensor(0).shape();
+            this.outputSize = outputShape;
 
             Log.i("tfliteSupport", "Model loaded: " + currentConfig.modelFile
                     + ", inputSize=" + modelW + "x" + modelH
-                    + ", outputSize=" + Arrays.toString(outputSize)
-                    + ", anchors=" + anchorCount);
+                    + ", inputShape=" + Arrays.toString(inputShape)
+                    + ", outputShape=" + Arrays.toString(outputShape)
+                    + ", isInt8=" + currentConfig.isInt8);
 
             associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
             Log.i("tfliteSupport", "Labels loaded: " + currentConfig.labelFile
@@ -165,14 +165,13 @@ public class Yolov5TFLiteDetector {
         // Preprocess
         TensorImage input = preprocessImage(bitmap);
 
-        // Run inference
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize,
-                currentConfig.isInt8 ? DataType.UINT8 : DataType.FLOAT32);
+        // Run inference - use actual output tensor data type from model
+        DataType outputDataType = tflite.getOutputTensor(0).dataType();
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize, outputDataType);
         tflite.run(input.getBuffer(), outputBuffer.getBuffer());
 
         // Post-process INT8 if needed
-        // P2-14 FIX: Reuse TensorProcessor instead of creating new one each detect
-        if (currentConfig.isInt8) {
+        if (outputDataType == DataType.UINT8) {
             if (int8TensorProcessor == null) {
                 int8TensorProcessor = new TensorProcessor.Builder()
                         .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
