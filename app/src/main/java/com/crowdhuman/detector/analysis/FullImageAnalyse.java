@@ -127,16 +127,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Canvas canvas = new Canvas(pooledFullImageBitmap);
                 canvas.drawBitmap(pooledImageBitmap, transform, null);
 
-                int cropW = Math.min(previewWidth, pooledFullImageBitmap.getWidth());
-                int cropH = Math.min(previewHeight, pooledFullImageBitmap.getHeight());
-                if (cropW <= 0 || cropH <= 0) {
-                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
-                    return;
-                }
-
-                // Always crop from (0,0) to match original logic.
-                // Center crop would require offset compensation in modelToPreview transform.
-                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, cropW, cropH);
+                // Original logic: always crop previewWidth x previewHeight from (0,0)
+                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, previewWidth, previewHeight);
 
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
                         cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
