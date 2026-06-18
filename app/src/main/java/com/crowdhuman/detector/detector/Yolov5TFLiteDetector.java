@@ -37,16 +37,12 @@ import java.util.Map;
 
 public class Yolov5TFLiteDetector {
 
-    private static final Size DEFAULT_INPUT_SIZE = new Size(320, 320);
-    private Size inputSize; // Dynamic, set from model tensor shape
+    // Original hardcoded sizes for 320x320 YOLOv5 models
+    private static final Size INPUT_SIZE = new Size(320, 320);
+    private static final int[] OUTPUT_SIZE = new int[]{1, 6300, 85};
     private static final float DETECT_THRESHOLD = 0.25f;
     private static final float IOU_THRESHOLD = 0.45f;
     private static final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
-    // P1-10 FIX: Calculate anchor count from input size instead of hardcoding
-    // YOLOv5 uses 3 scales with stride [8, 16, 32]
-    // For 320x320: (320/8)^2 + (320/16)^2 + (320/32)^2 = 1600 + 400 + 100 = 2100 per anchor
-    // With 3 anchors per scale: 2100 * 3 = 6300
-    // Formula: sum((input_size / stride)^2) * 3
     private static final MetadataExtractor.QuantizationParams INPUT_INT8_QUANT =
             new MetadataExtractor.QuantizationParams(0.003921568859368563f, 0);
     private static final MetadataExtractor.QuantizationParams OUTPUT_INT8_QUANT =
@@ -68,14 +64,12 @@ public class Yolov5TFLiteDetector {
     private Interpreter.Options options;
     private List<String> associatedAxisLabels;
     private ModelConfig currentConfig;
-    private int[] outputSize;
     private final NmsProcessor nmsProcessor;
     // P2-14 FIX: Reuse TensorProcessor for INT8 models
     private TensorProcessor int8TensorProcessor;
 
     public Yolov5TFLiteDetector() {
         this.nmsProcessor = new NmsProcessor(DETECT_THRESHOLD, IOU_THRESHOLD);
-        this.inputSize = DEFAULT_INPUT_SIZE;
     }
 
     /**
@@ -88,14 +82,13 @@ public class Yolov5TFLiteDetector {
             return false;
         }
         this.currentConfig = config;
-        // outputSize will be calculated in initialModel() after reading actual tensor shape
         return true;
     }
 
     public String getModelFile() { return currentConfig != null ? currentConfig.modelFile : null; }
     public String getModelKey() { return currentConfig != null ? currentConfig.key : null; }
-    public Size getInputSize() { return inputSize; }
-    public int[] getOutputSize() { return outputSize; }
+    public Size getInputSize() { return INPUT_SIZE; }
+    public int[] getOutputSize() { return OUTPUT_SIZE; }
     public int getNumClasses() { return currentConfig != null ? currentConfig.numClasses : 0; }
 
     /**
@@ -114,27 +107,11 @@ public class Yolov5TFLiteDetector {
 
             ByteBuffer tfliteModel = FileUtil.loadMappedFile(context, currentConfig.modelFile);
             tflite = new Interpreter(tfliteModel, options);
+            Log.i("tfliteSupport", "Success reading model: " + currentConfig.modelFile);
 
-            // Read actual input size from model tensor shape
-            int[] inputShape = tflite.getInputTensor(0).shape();
-            int modelH = inputShape[inputShape.length - 1];
-            int modelW = inputShape[inputShape.length - 2];
-            this.inputSize = new Size(modelW, modelH);
-
-            // Read actual output size from model output tensor shape (NOT calculated)
-            int[] outputShape = tflite.getOutputTensor(0).shape();
-            this.outputSize = outputShape;
-
-            Log.i("tfliteSupport", "Model loaded: " + currentConfig.modelFile
-                    + ", inputSize=" + modelW + "x" + modelH
-                    + ", inputShape=" + Arrays.toString(inputShape)
-                    + ", outputShape=" + Arrays.toString(outputShape)
-                    + ", isInt8=" + currentConfig.isInt8);
-
+            // Load labels
             associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
-            Log.i("tfliteSupport", "Labels loaded: " + currentConfig.labelFile
-                    + ", outputSize=" + Arrays.toString(outputSize)
-                    + ", classes=" + currentConfig.numClasses);
+            Log.i("tfliteSupport", "Success reading label: " + currentConfig.labelFile);
 
             if (callback != null) callback.onModelLoaded(currentConfig.modelFile);
 
@@ -149,29 +126,31 @@ public class Yolov5TFLiteDetector {
         if (gpuDelegate != null) { gpuDelegate.close(); gpuDelegate = null; }
         if (nnApiDelegate != null) { nnApiDelegate.close(); nnApiDelegate = null; }
         options = null;
-        // Reset inputSize to default so setModelFile() calculates correctly
-        this.inputSize = DEFAULT_INPUT_SIZE;
     }
 
     /**
      * LSP: Returns empty list if model not loaded (caller can check getModelFile() != null first).
      */
     public ArrayList<Recognition> detect(Bitmap bitmap) {
-        if (tflite == null || currentConfig == null || outputSize == null) {
-            Log.e("tfliteSupport", "Interpreter is null or outputSize not set, model not loaded!");
+        if (tflite == null || currentConfig == null) {
+            Log.e("tfliteSupport", "Interpreter is null, model not loaded!");
             return new ArrayList<>();
         }
 
         // Preprocess
         TensorImage input = preprocessImage(bitmap);
 
-        // Run inference - use actual output tensor data type from model
-        DataType outputDataType = tflite.getOutputTensor(0).dataType();
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize, outputDataType);
+        // Run inference - original hardcoded output size and data type
+        TensorBuffer outputBuffer;
+        if (currentConfig.isInt8) {
+            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.UINT8);
+        } else {
+            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+        }
         tflite.run(input.getBuffer(), outputBuffer.getBuffer());
 
         // Post-process INT8 if needed
-        if (outputDataType == DataType.UINT8) {
+        if (currentConfig.isInt8) {
             if (int8TensorProcessor == null) {
                 int8TensorProcessor = new TensorProcessor.Builder()
                         .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
@@ -195,39 +174,35 @@ public class Yolov5TFLiteDetector {
 
     private TensorImage preprocessImage(Bitmap bitmap) {
         ImageProcessor.Builder builder = new ImageProcessor.Builder()
-                .add(new ResizeOp(inputSize.getHeight(), inputSize.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
+                .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
                 .add(new NormalizeOp(0, 255));
-
         if (currentConfig.isInt8) {
             builder.add(new QuantizeOp(INPUT_INT8_QUANT.getZeroPoint(), INPUT_INT8_QUANT.getScale()))
-                   .add(new CastOp(DataType.UINT8));
-            TensorImage input = new TensorImage(DataType.UINT8);
-            input.load(bitmap);
-            return builder.build().process(input);
-        } else {
-            TensorImage input = new TensorImage(DataType.FLOAT32);
-            input.load(bitmap);
-            return builder.build().process(input);
+                    .add(new CastOp(DataType.UINT8));
         }
+        ImageProcessor imageProcessor = builder.build();
+        TensorImage input = new TensorImage(currentConfig.isInt8 ? DataType.UINT8 : DataType.FLOAT32);
+        input.load(bitmap);
+        return imageProcessor.process(input);
     }
 
     private ArrayList<Recognition> decodeOutput(float[] data) {
         ArrayList<Recognition> results = new ArrayList<>();
-        for (int i = 0; i < outputSize[1]; i++) {
-            int stride = i * outputSize[2];
-            float x = data[0 + stride] * inputSize.getWidth();
-            float y = data[1 + stride] * inputSize.getHeight();
-            float w = data[2 + stride] * inputSize.getWidth();
-            float h = data[3 + stride] * inputSize.getHeight();
-            int xmin = (int) Math.max(0, x - w / 2);
-            int ymin = (int) Math.max(0, y - h / 2);
-            int xmax = (int) Math.min(inputSize.getWidth(), x + w / 2);
-            int ymax = (int) Math.min(inputSize.getHeight(), y + h / 2);
+        for (int i = 0; i < OUTPUT_SIZE[1]; i++) {
+            int stride = i * OUTPUT_SIZE[2];
+            float x = data[0 + stride] * INPUT_SIZE.getWidth();
+            float y = data[1 + stride] * INPUT_SIZE.getHeight();
+            float w = data[2 + stride] * INPUT_SIZE.getWidth();
+            float h = data[3 + stride] * INPUT_SIZE.getHeight();
+            int xmin = (int) Math.max(0, x - w / 2.);
+            int ymin = (int) Math.max(0, y - h / 2.);
+            int xmax = (int) Math.min(INPUT_SIZE.getWidth(), x + w / 2.);
+            int ymax = (int) Math.min(INPUT_SIZE.getHeight(), y + h / 2.);
             float confidence = data[4 + stride];
 
-            float[] classScores = Arrays.copyOfRange(data, 5 + stride, outputSize[2] + stride);
+            float[] classScores = Arrays.copyOfRange(data, 5 + stride, OUTPUT_SIZE[2] + stride);
             int labelId = 0;
-            float maxScore = 0;
+            float maxScore = 0.f;
             for (int j = 0; j < classScores.length; j++) {
                 if (classScores[j] > maxScore) {
                     maxScore = classScores[j];
@@ -235,10 +210,7 @@ public class Yolov5TFLiteDetector {
                 }
             }
 
-            // YOLOv5 TFLite model output: confidence is already the objectness score.
-            // For detection threshold filtering, we use confidence directly.
-            // labelScore is used for NMS threshold comparison.
-            results.add(new Recognition(labelId, "", confidence, confidence,
+            results.add(new Recognition(labelId, "", maxScore, confidence,
                     new RectF(xmin, ymin, xmax, ymax)));
         }
         return results;
@@ -285,17 +257,4 @@ public class Yolov5TFLiteDetector {
         return nmsProcessor.getDetectThreshold();
     }
 
-    /**
-     * P1-10 FIX: Calculate YOLOv5 anchor count from input size.
-     * YOLOv5 uses 3 scales with strides [8, 16, 32] and 3 anchors per scale.
-     */
-    private static int calculateAnchorCount(int inputSize) {
-        int[] strides = {8, 16, 32};
-        int total = 0;
-        for (int stride : strides) {
-            int grid = inputSize / stride;
-            total += grid * grid;
-        }
-        return total * 3; // 3 anchors per scale
-    }
 }
