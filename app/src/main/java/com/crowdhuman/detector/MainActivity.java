@@ -309,22 +309,60 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < labels.length; i++) {
             checked[i] = enabledLabels.contains(i);
         }
-        new AlertDialog.Builder(this)
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Filter Classes")
-                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
-                    if (isChecked) {
-                        enabledLabels.add(which);
-                    } else {
-                        enabledLabels.remove(which);
-                    }
+                .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> {
+                    if (isChecked) enabledLabels.add(which);
+                    else enabledLabels.remove(which);
                 })
-                .setPositiveButton("OK", (dialog, which) -> {
+                .setPositiveButton("OK", (d, which) -> {
                     if (currentAnalyser != null) {
                         currentAnalyser.setEnabledLabels(new java.util.HashSet<>(enabledLabels));
                     }
                 })
                 .setNegativeButton("Cancel", null)
-                .show();
+                .create();
+
+        android.widget.LinearLayout footer = new android.widget.LinearLayout(this);
+        footer.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        footer.setGravity(android.view.Gravity.CENTER);
+        footer.setPadding(16, 16, 16, 16);
+
+        android.widget.Button btnAll = new android.widget.Button(this);
+        btnAll.setText("All");
+        btnAll.setOnClickListener(v -> {
+            for (int i = 0; i < labels.length; i++) {
+                enabledLabels.add(i);
+                dialog.getListView().setItemChecked(i, true);
+            }
+        });
+
+        android.widget.Button btnNone = new android.widget.Button(this);
+        btnNone.setText("None");
+        btnNone.setOnClickListener(v -> {
+            enabledLabels.clear();
+            for (int i = 0; i < labels.length; i++) {
+                dialog.getListView().setItemChecked(i, false);
+            }
+        });
+
+        android.widget.Button btnInvert = new android.widget.Button(this);
+        btnInvert.setText("Invert");
+        btnInvert.setOnClickListener(v -> {
+            for (int i = 0; i < labels.length; i++) {
+                boolean newState = !enabledLabels.contains(i);
+                if (newState) enabledLabels.add(i);
+                else enabledLabels.remove(i);
+                dialog.getListView().setItemChecked(i, newState);
+            }
+        });
+
+        footer.addView(btnAll);
+        footer.addView(btnNone);
+        footer.addView(btnInvert);
+        dialog.getListView().addFooterView(footer);
+        dialog.show();
     }
 
     private void applyOrientationMode() {

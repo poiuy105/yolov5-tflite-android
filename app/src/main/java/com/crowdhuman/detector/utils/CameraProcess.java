@@ -113,8 +113,9 @@ public class CameraProcess {
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
 
-                // Preview: let CameraX auto-select resolution based on PreviewView size
+                // Preview: 4:3 aspect ratio (portrait = 3:4)
                 Preview preview = new Preview.Builder()
+                        .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                         .build();
                 CameraSelector selector = new CameraSelector.Builder()
                         .requireLensFacing(currentLensFacing).build();
