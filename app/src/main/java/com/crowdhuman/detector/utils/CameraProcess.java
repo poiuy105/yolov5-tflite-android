@@ -10,6 +10,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
@@ -98,6 +99,7 @@ public class CameraProcess {
 
                 // Query max resolution via Camera2 characteristics
                 android.util.Size maxSize = getMaxAnalysisResolution(context, currentLensFacing);
+                Log.i("CameraProcess", "Requesting analysis resolution: " + maxSize.getWidth() + "x" + maxSize.getHeight());
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                         .setTargetResolution(maxSize)
