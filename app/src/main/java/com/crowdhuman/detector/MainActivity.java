@@ -345,7 +345,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        startCameraWithCurrentMode();
+        // Delay camera restart to avoid race condition during rotation
+        cameraPreviewMatch.postDelayed(() -> {
+            if (!isFinishing() && !isDestroyed()) {
+                startCameraWithCurrentMode();
+            }
+        }, 300);
     }
 
     private void requestCameraPermission() {

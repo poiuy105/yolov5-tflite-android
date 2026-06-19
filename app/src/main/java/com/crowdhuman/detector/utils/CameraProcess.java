@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutionException;
 public class CameraProcess {
 
     private ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
+    private volatile boolean isStarting = false;
     private static final int REQUEST_CODE_PERMISSIONS = 1001;
     private static final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA"};
     private int currentLensFacing = CameraSelector.LENS_FACING_BACK;
@@ -92,6 +93,11 @@ public class CameraProcess {
     }
 
     public void startCamera(Context context, ImageAnalysis.Analyzer analyzer, PreviewView previewView, CameraErrorCallback errorCallback) {
+        if (isStarting) {
+            Log.w("CameraProcess", "Camera start already in progress, skipping");
+            return;
+        }
+        isStarting = true;
         cameraProviderFuture = ProcessCameraProvider.getInstance(context);
         cameraProviderFuture.addListener(() -> {
             try {
@@ -125,6 +131,8 @@ public class CameraProcess {
             } catch (ExecutionException | InterruptedException e) {
                 Log.e("CameraProcess", "Failed to start camera: " + e.getMessage(), e);
                 if (errorCallback != null) errorCallback.onCameraError("Camera failed: " + e.getMessage());
+            } finally {
+                isStarting = false;
             }
         }, ContextCompat.getMainExecutor(context));
     }
