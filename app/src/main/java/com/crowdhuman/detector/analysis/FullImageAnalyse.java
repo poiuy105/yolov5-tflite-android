@@ -34,6 +34,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private final boolean isFrontCamera;
     private AnalyseCallback callback;
     private Disposable currentDisposable;
+    private java.util.Set<Integer> enabledLabels;
 
     // FPS calculation - P1-6 FIX: volatile for thread visibility
     private volatile long lastFrameTime = 0;
@@ -67,6 +68,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
      */
     public void setRotation(int rotation) {
         this.rotation = rotation;
+    }
+
+    public void setEnabledLabels(java.util.Set<Integer> labels) {
+        this.enabledLabels = labels;
     }
 
     public void dispose() {
@@ -150,6 +155,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     return;
                 }
 
+                if (enabledLabels != null) {
+                    detector.setEnabledLabels(enabledLabels);
+                }
                 ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
 
                 // Calculate FPS

@@ -116,6 +116,16 @@
             android:padding="8dp"
             android:contentDescription="@string/rotate_desc"
             android:src="@drawable/ic_rotate"
+            android:background="@drawable/bg_circle_button"
+            android:layout_marginEnd="8dp"/>
+
+        <ImageView
+            android:id="@+id/filter_button"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:contentDescription="@string/filter_desc"
+            android:src="@drawable/ic_filter"
             android:background="@drawable/bg_circle_button"/>
 
     </LinearLayout>

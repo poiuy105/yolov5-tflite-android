@@ -266,4 +266,9 @@ public class Yolov5TFLiteDetector {
         return enabledLabels;
     }
 
+    public String[] getLabels() {
+        if (associatedAxisLabels == null) return new String[0];
+        return associatedAxisLabels.toArray(new String[0]);
+    }
+
 }

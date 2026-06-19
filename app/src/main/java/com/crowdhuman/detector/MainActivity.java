@@ -17,6 +17,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
@@ -45,6 +46,7 @@ public class MainActivity extends AppCompatActivity {
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
     private final CameraProcess cameraProcess = new CameraProcess();
+    private java.util.Set<Integer> enabledLabels = new java.util.HashSet<>();
 
     // Views
     private PreviewView cameraPreviewMatch;
@@ -60,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView screenshotButton;
     private ImageView galleryButton;
     private ImageView rotateButton;
+    private ImageView filterButton;
     private CircularProgressIndicator loadingIndicator;
     private View errorPanel;
     private TextView errorText;
@@ -81,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
 
         bindViews();
         setupListeners();
+        initDefaultLabels();
 
         // Load default model
         initModel(DEFAULT_MODEL);
@@ -104,6 +108,7 @@ public class MainActivity extends AppCompatActivity {
         screenshotButton = findViewById(R.id.screenshot);
         galleryButton = findViewById(R.id.gallery);
         rotateButton = findViewById(R.id.rotate_button);
+        filterButton = findViewById(R.id.filter_button);
         loadingIndicator = findViewById(R.id.loading_indicator);
         errorPanel = findViewById(R.id.error_panel);
         errorText = findViewById(R.id.error_text);
@@ -136,6 +141,8 @@ public class MainActivity extends AppCompatActivity {
             rotationOffsetIndex = (rotationOffsetIndex + 1) % ROTATION_OFFSETS.length;
             setRotationOffset();
         });
+
+        filterButton.setOnClickListener(v -> showClassFilterDialog());
 
         thresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             private float lastThreshold = -1f;
@@ -222,6 +229,10 @@ public class MainActivity extends AppCompatActivity {
 
         CameraProcess.CameraErrorCallback errCb = msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
         cameraProcess.startCamera(this, currentAnalyser, cameraPreviewMatch, errCb);
+
+        if (currentAnalyser != null) {
+            currentAnalyser.setEnabledLabels(new java.util.HashSet<>(enabledLabels));
+        }
     }
 
     private void takeScreenshot() {
@@ -250,6 +261,41 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onSuccess() { Toast.makeText(MainActivity.this, "Screenshot saved", Toast.LENGTH_SHORT).show(); }
             @Override public void onError(String msg) { Toast.makeText(MainActivity.this, "Save failed: " + msg, Toast.LENGTH_SHORT).show(); }
         });
+    }
+
+    private void initDefaultLabels() {
+        enabledLabels.clear();
+        for (int i = 0; i < 80; i++) {
+            enabledLabels.add(i);
+        }
+    }
+
+    private void showClassFilterDialog() {
+        String[] labels = detector.getLabels();
+        if (labels.length == 0) {
+            Toast.makeText(this, "Labels not loaded yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean[] checked = new boolean[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            checked[i] = enabledLabels.contains(i);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Filter Classes")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
+                    if (isChecked) {
+                        enabledLabels.add(which);
+                    } else {
+                        enabledLabels.remove(which);
+                    }
+                })
+                .setPositiveButton("OK", (dialog, which) -> {
+                    if (currentAnalyser != null) {
+                        currentAnalyser.setEnabledLabels(new java.util.HashSet<>(enabledLabels));
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void setRotationOffset() {

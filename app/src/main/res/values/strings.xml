@@ -18,6 +18,7 @@
     <string name="screenshot_desc">Take screenshot</string>
     <string name="gallery_desc">Gallery detection</string>
     <string name="rotate_desc">Rotate detection</string>
+    <string name="filter_desc">Filter classes</string>
 
     <string-array name="model">
         <item>yolov5s</item>
