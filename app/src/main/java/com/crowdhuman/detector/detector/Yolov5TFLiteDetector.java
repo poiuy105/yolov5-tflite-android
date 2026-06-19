@@ -52,10 +52,7 @@ public class Yolov5TFLiteDetector {
     // OCP: Configuration table instead of switch-case
     private static final Map<String, ModelConfig> MODEL_CONFIGS = new HashMap<>();
     static {
-        MODEL_CONFIGS.put("yolov5s", new ModelConfig("yolov5s", "yolov5s-fp16-320-metadata.tflite", "coco_label.txt", 80, false));
         MODEL_CONFIGS.put("yolov5n", new ModelConfig("yolov5n", "yolov5n-fp16-320.tflite", "coco_label.txt", 80, false));
-        MODEL_CONFIGS.put("yolov5m", new ModelConfig("yolov5m", "yolov5m-fp16-320.tflite", "coco_label.txt", 80, false));
-        MODEL_CONFIGS.put("yolov5s-int8", new ModelConfig("yolov5s-int8", "yolov5s-int8-320.tflite", "coco_label.txt", 80, true));
     }
 
     private Interpreter tflite;

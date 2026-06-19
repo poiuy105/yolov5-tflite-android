@@ -1,14 +1,13 @@
-name: Build Android APK with CrowdHuman Model
+name: Build Android APK - YOLOv5n Debug Only
 
 on:
   push:
     branches: [master]
-  pull_request:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 jobs:
   build-apk:
@@ -28,12 +27,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Verify model files exist in assets
+      - name: Verify yolov5n model exists in assets
         run: |
           echo "=== Assets files ==="
           ls -lh app/src/main/assets/*.tflite
-          echo "=== Checking yolov5s model ==="
-          test -f app/src/main/assets/yolov5s-fp16-320-metadata.tflite && echo "OK: yolov5s model exists" || { echo "FAIL: yolov5s model missing!"; exit 1; }
+          echo "=== Checking yolov5n model ==="
+          test -f app/src/main/assets/yolov5n-fp16-320.tflite && echo "OK: yolov5n model exists" || { echo "FAIL: yolov5n model missing!"; exit 1; }
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -41,65 +40,14 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
-
       - name: List build outputs
         run: |
           echo "=== Debug APK ==="
           ls -lh app/build/outputs/apk/debug/
-          echo "=== Release APK ==="
-          ls -lh app/build/outputs/apk/release/
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crowdhuman-detector-debug
+          name: yolov5n-debug
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-      - name: Upload Release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: crowdhuman-detector-release
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 90
-
-      - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "CrowdHuman Person Detector v1.0.${{ github.run_number }}"
-          body: |
-            ## CrowdHuman Person Detector - Android APK
-
-            ### Features
-            - Real-time person detection using YOLOv5m trained on CrowdHuman dataset
-            - Supports crowded scenes (back view, side view, partial occlusion)
-            - Camera-based real-time detection with front/back camera switch
-            - Switch between CrowdHuman model and standard COCO models
-            - Detection count display
-            - Screenshot save to gallery
-            - Full-screen / full-image display modes
-
-            ### Model Info
-            - **Base model**: YOLOv5m
-            - **Training dataset**: CrowdHuman
-            - **Classes**: person (single class)
-            - **Input size**: 320x320 (optimized for mobile)
-
-            ### Installation
-            1. Download the APK file
-            2. Enable "Install from unknown sources" in Android settings
-            3. Install the APK
-            4. Grant camera permission when prompted
-
-            ### Requirements
-            - Android 7.0+ (API 24+)
-            - Camera permission
-          files: app/build/outputs/apk/release/*.apk
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          retention-days: 7
