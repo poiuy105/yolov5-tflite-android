@@ -13,9 +13,6 @@ import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
-import androidx.camera.core.ResolutionSelector;
-import androidx.camera.core.ResolutionStrategy;
-import androidx.camera.core.Size;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -57,7 +54,7 @@ public class CameraProcess {
      * Query the maximum YUV_420_888 analysis resolution for the given lens facing
      * using Camera2 CameraCharacteristics.
      */
-    private Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
+    private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
         CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         try {
             for (String cameraId : cm.getCameraIdList()) {
@@ -78,7 +75,7 @@ public class CameraProcess {
                     }
                     Log.i("CameraProcess", "Max analysis resolution for facing=" + lensFacing
                             + ": " + max.getWidth() + "x" + max.getHeight());
-                    return new Size(max.getWidth(), max.getHeight());
+                    return max;
                 }
             }
         } catch (CameraAccessException e) {
@@ -86,7 +83,7 @@ public class CameraProcess {
         }
         // Fallback
         Log.w("CameraProcess", "Could not query max resolution, using fallback 1920x1080");
-        return new Size(1920, 1080);
+        return new android.util.Size(1920, 1080);
     }
 
     public void startCamera(Context context, ImageAnalysis.Analyzer analyzer, PreviewView previewView) {
@@ -100,18 +97,10 @@ public class CameraProcess {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
                 // Query max resolution via Camera2 characteristics
-                Size maxSize = getMaxAnalysisResolution(context, currentLensFacing);
-
-                // Configure ImageAnalysis with ResolutionSelector for max resolution
-                ResolutionSelector resolutionSelector = new ResolutionSelector.Builder()
-                        .setResolutionStrategy(new ResolutionStrategy(
-                                maxSize,
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                        ))
-                        .build();
+                android.util.Size maxSize = getMaxAnalysisResolution(context, currentLensFacing);
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setResolutionSelector(resolutionSelector)
+                        .setTargetResolution(maxSize)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
