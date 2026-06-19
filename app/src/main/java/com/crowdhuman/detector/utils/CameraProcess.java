@@ -8,7 +8,6 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Log;
-import android.util.Size;
 
 import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
@@ -16,6 +15,7 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
 import androidx.camera.core.ResolutionSelector;
 import androidx.camera.core.ResolutionStrategy;
+import androidx.camera.core.Size;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -78,7 +78,7 @@ public class CameraProcess {
                     }
                     Log.i("CameraProcess", "Max analysis resolution for facing=" + lensFacing
                             + ": " + max.getWidth() + "x" + max.getHeight());
-                    return max;
+                    return new Size(max.getWidth(), max.getHeight());
                 }
             }
         } catch (CameraAccessException e) {
