@@ -37,9 +37,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
     private static final String DEFAULT_MODEL = "crowdhuman";
+    private static final int[] ROTATION_OFFSETS = {0, 90, 270}; // direct, right, left
+    private static final String[] ROTATION_LABELS = {"0°", "90°", "270°"};
 
     private boolean isFullScreen = true; // Default: full screen
     private boolean isSpinnerInitialized = false;
+    private int rotationOffsetIndex = 0; // 0=direct, 1=right, 2=left
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
     private final CameraProcess cameraProcess = new CameraProcess();
@@ -58,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView cameraSwitchButton;
     private ImageView screenshotButton;
     private ImageView galleryButton;
+    private ImageView rotateButton;
     private CircularProgressIndicator loadingIndicator;
     private View errorPanel;
     private TextView errorText;
@@ -102,6 +106,7 @@ public class MainActivity extends AppCompatActivity {
         cameraSwitchButton = findViewById(R.id.camera_switch);
         screenshotButton = findViewById(R.id.screenshot);
         galleryButton = findViewById(R.id.gallery);
+        rotateButton = findViewById(R.id.rotate_button);
         loadingIndicator = findViewById(R.id.loading_indicator);
         errorPanel = findViewById(R.id.error_panel);
         errorText = findViewById(R.id.error_text);
@@ -138,6 +143,11 @@ public class MainActivity extends AppCompatActivity {
 
         screenshotButton.setOnClickListener(v -> takeScreenshot());
         galleryButton.setOnClickListener(v -> Toast.makeText(this, "Gallery detection coming soon", Toast.LENGTH_SHORT).show());
+
+        rotateButton.setOnClickListener(v -> {
+            rotationOffsetIndex = (rotationOffsetIndex + 1) % ROTATION_OFFSETS.length;
+            setRotationOffset();
+        });
 
         thresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             private float lastThreshold = -1f;
@@ -201,12 +211,13 @@ public class MainActivity extends AppCompatActivity {
         if (currentAnalyser != null) currentAnalyser.dispose();
 
         int rotation = DisplayUtils.getScreenOrientation(this);
+        int effectiveRotation = (rotation + ROTATION_OFFSETS[rotationOffsetIndex]) % 360;
 
         // Set preview scale type based on full screen mode
         cameraPreviewMatch.setScaleType(
                 isFullScreen ? PreviewView.ScaleType.FILL_START : PreviewView.ScaleType.FIT_CENTER);
 
-        currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation,
+        currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, effectiveRotation,
                 detector, isFullScreen, cameraProcess.isFrontCamera());
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
@@ -255,6 +266,15 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onSuccess() { Toast.makeText(MainActivity.this, "Screenshot saved", Toast.LENGTH_SHORT).show(); }
             @Override public void onError(String msg) { Toast.makeText(MainActivity.this, "Save failed: " + msg, Toast.LENGTH_SHORT).show(); }
         });
+    }
+
+    private void setRotationOffset() {
+        if (currentAnalyser == null) return;
+        int rotation = DisplayUtils.getScreenOrientation(this);
+        int effectiveRotation = (rotation + ROTATION_OFFSETS[rotationOffsetIndex]) % 360;
+        currentAnalyser.setRotation(effectiveRotation);
+        String label = ROTATION_LABELS[rotationOffsetIndex];
+        Toast.makeText(this, "Rotation: " + label, Toast.LENGTH_SHORT).show();
     }
 
     private void requestCameraPermission() {
