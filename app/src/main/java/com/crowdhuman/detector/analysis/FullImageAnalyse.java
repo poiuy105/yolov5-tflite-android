@@ -27,7 +27,7 @@ import io.reactivex.rxjava3.schedulers.Schedulers;
 public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     private final PreviewView previewView;
-    private int rotation;
+    private final int rotation;
     private final Yolov5TFLiteDetector detector;
     private final ImageProcess imageProcess;
     private final DetectionRenderer renderer;
@@ -60,14 +60,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     public void setCallback(AnalyseCallback callback) {
         this.callback = callback;
-    }
-
-    /**
-     * Update image rotation offset for detection without restarting camera.
-     * @param rotation 0=direct, 90=rotate right, 270=rotate left
-     */
-    public void setRotation(int rotation) {
-        this.rotation = rotation;
     }
 
     public void setEnabledLabels(java.util.Set<Integer> labels) {

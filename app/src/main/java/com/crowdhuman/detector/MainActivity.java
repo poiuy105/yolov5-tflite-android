@@ -1,6 +1,7 @@
 package com.crowdhuman.detector;
 
 import android.Manifest;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -38,11 +39,13 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
     private static final String DEFAULT_MODEL = "yolov5s";
-    private static final int[] ROTATION_OFFSETS = {0, 90, 270}; // direct, right, left
-    private static final String[] ROTATION_LABELS = {"0°", "90°", "270°"};
+    private static final int ORIENTATION_AUTO = 0;
+    private static final int ORIENTATION_PORTRAIT = 1;
+    private static final int ORIENTATION_LANDSCAPE = 2;
+    private static final String[] ORIENTATION_LABELS = {"Auto", "Portrait", "Landscape"};
 
     private boolean isSpinnerInitialized = false;
-    private int rotationOffsetIndex = 0; // 0=direct, 1=right, 2=left
+    private int orientationMode = ORIENTATION_AUTO;
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
     private final CameraProcess cameraProcess = new CameraProcess();
@@ -138,8 +141,8 @@ public class MainActivity extends AppCompatActivity {
         galleryButton.setOnClickListener(v -> Toast.makeText(this, "Gallery detection coming soon", Toast.LENGTH_SHORT).show());
 
         rotateButton.setOnClickListener(v -> {
-            rotationOffsetIndex = (rotationOffsetIndex + 1) % ROTATION_OFFSETS.length;
-            setRotationOffset();
+            orientationMode = (orientationMode + 1) % 3;
+            applyOrientationMode();
         });
 
         filterButton.setOnClickListener(v -> showClassFilterDialog());
@@ -206,9 +209,8 @@ public class MainActivity extends AppCompatActivity {
         if (currentAnalyser != null) currentAnalyser.dispose();
 
         int rotation = DisplayUtils.getScreenOrientation(this);
-        int effectiveRotation = (rotation + ROTATION_OFFSETS[rotationOffsetIndex]) % 360;
 
-        currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, effectiveRotation,
+        currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation,
                 detector, cameraProcess.isFrontCamera());
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
@@ -298,13 +300,25 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void setRotationOffset() {
-        if (currentAnalyser == null) return;
-        int rotation = DisplayUtils.getScreenOrientation(this);
-        int effectiveRotation = (rotation + ROTATION_OFFSETS[rotationOffsetIndex]) % 360;
-        currentAnalyser.setRotation(effectiveRotation);
-        String label = ROTATION_LABELS[rotationOffsetIndex];
-        Toast.makeText(this, "Rotation: " + label, Toast.LENGTH_SHORT).show();
+    private void applyOrientationMode() {
+        switch (orientationMode) {
+            case ORIENTATION_AUTO:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+                break;
+            case ORIENTATION_PORTRAIT:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                break;
+            case ORIENTATION_LANDSCAPE:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                break;
+        }
+        Toast.makeText(this, "Orientation: " + ORIENTATION_LABELS[orientationMode], Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        startCameraWithCurrentMode();
     }
 
     private void requestCameraPermission() {
