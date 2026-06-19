@@ -74,7 +74,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
         // P3 FIX: Use WindowInsetsController on API 30+, fallback for older versions
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -84,6 +83,21 @@ public class MainActivity extends AppCompatActivity {
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         }
         getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        setStatusBarIconColor(false);
+
+        setContentView(R.layout.activity_main);
+
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(
+            findViewById(R.id.root_layout),
+            (view, insets) -> {
+                androidx.core.graphics.Insets statusBars = insets.getInsets(
+                    androidx.core.view.WindowInsetsCompat.Type.statusBars());
+                androidx.core.graphics.Insets navBars = insets.getInsets(
+                    androidx.core.view.WindowInsetsCompat.Type.navigationBars());
+                view.setPadding(statusBars.left, statusBars.top, statusBars.right, navBars.bottom);
+                return insets;
+            });
 
         bindViews();
         setupListeners();
@@ -94,6 +108,19 @@ public class MainActivity extends AppCompatActivity {
 
         // Request permissions
         requestCameraPermission();
+    }
+
+    private void setStatusBarIconColor(boolean light) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            View decorView = getWindow().getDecorView();
+            int flags = decorView.getSystemUiVisibility();
+            if (light) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            } else {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+            decorView.setSystemUiVisibility(flags);
+        }
     }
 
     private void bindViews() {
