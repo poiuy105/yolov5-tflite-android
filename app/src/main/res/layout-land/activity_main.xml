@@ -89,6 +89,15 @@
                 android:padding="6dp"
                 android:src="@drawable/ic_filter"
                 android:background="@drawable/bg_circle_button"/>
+
+            <ImageView
+                android:id="@+id/gallery"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:padding="6dp"
+                android:src="@drawable/ic_gallery"
+                android:background="@drawable/bg_circle_button"
+                android:layout_marginStart="6dp"/>
         </LinearLayout>
 
         <TextView
@@ -99,6 +108,16 @@
             android:text="@string/threshold_label"
             app:layout_constraintTop_toBottomOf="@id/top_toolbar"
             app:layout_constraintLeft_toLeftOf="parent"
+            android:layout_marginTop="12dp"/>
+
+        <TextView
+            android:id="@+id/threshold_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/white"
+            android:text="Threshold: 0.25"
+            app:layout_constraintTop_toBottomOf="@id/top_toolbar"
+            app:layout_constraintRight_toRightOf="parent"
             android:layout_marginTop="12dp"/>
 
         <SeekBar
