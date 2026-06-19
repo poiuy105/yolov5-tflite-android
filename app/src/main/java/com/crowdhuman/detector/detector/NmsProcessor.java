@@ -5,6 +5,7 @@ import android.graphics.RectF;
 import com.crowdhuman.detector.utils.Recognition;
 
 import java.util.ArrayList;
+import java.util.Set;
 
 public class NmsProcessor {
 
@@ -24,17 +25,24 @@ public class NmsProcessor {
         return detectThreshold;
     }
 
-    public ArrayList<Recognition> suppress(ArrayList<Recognition> allRecognitions, int numClasses, float crossClassIouThreshold) {
-        ArrayList<Recognition> perClassResult = perClassNms(allRecognitions, numClasses);
+    public ArrayList<Recognition> suppress(ArrayList<Recognition> allRecognitions, int numClasses, float crossClassIouThreshold, Set<Integer> enabledLabels) {
+        ArrayList<Recognition> perClassResult = perClassNms(allRecognitions, numClasses, enabledLabels);
         if (crossClassIouThreshold > 0) {
             perClassResult = singleNms(perClassResult, crossClassIouThreshold);
         }
         return perClassResult;
     }
 
-    private ArrayList<Recognition> perClassNms(ArrayList<Recognition> allRecognitions, int numClasses) {
+    public ArrayList<Recognition> suppress(ArrayList<Recognition> allRecognitions, int numClasses, float crossClassIouThreshold) {
+        return suppress(allRecognitions, numClasses, crossClassIouThreshold, null);
+    }
+
+    private ArrayList<Recognition> perClassNms(ArrayList<Recognition> allRecognitions, int numClasses, Set<Integer> enabledLabels) {
         ArrayList<Recognition> result = new ArrayList<>();
         for (int i = 0; i < numClasses; i++) {
+            if (enabledLabels != null && !enabledLabels.contains(i)) {
+                continue;
+            }
             result.addAll(singleNms(filterByClass(allRecognitions, i), iouThreshold));
         }
         return result;

@@ -33,6 +33,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 
 public class Yolov5TFLiteDetector {
@@ -64,6 +65,7 @@ public class Yolov5TFLiteDetector {
     private List<String> associatedAxisLabels;
     private ModelConfig currentConfig;
     private final NmsProcessor nmsProcessor;
+    private Set<Integer> enabledLabels;
     // P2-14 FIX: Reuse TensorProcessor for INT8 models
     private TensorProcessor int8TensorProcessor;
 
@@ -163,7 +165,7 @@ public class Yolov5TFLiteDetector {
 
         // NMS (OCP: single unified method)
         ArrayList<Recognition> filtered = nmsProcessor.suppress(
-                allRecognitions, currentConfig.numClasses, IOU_CLASS_DUPLICATED_THRESHOLD);
+                allRecognitions, currentConfig.numClasses, IOU_CLASS_DUPLICATED_THRESHOLD, enabledLabels);
 
         // Assign labels
         assignLabels(filtered);
@@ -254,6 +256,14 @@ public class Yolov5TFLiteDetector {
 
     public float getDetectThreshold() {
         return nmsProcessor.getDetectThreshold();
+    }
+
+    public void setEnabledLabels(Set<Integer> labels) {
+        this.enabledLabels = labels;
+    }
+
+    public Set<Integer> getEnabledLabels() {
+        return enabledLabels;
     }
 
 }
