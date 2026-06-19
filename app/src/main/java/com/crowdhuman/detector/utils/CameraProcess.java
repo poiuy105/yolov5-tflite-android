@@ -113,9 +113,8 @@ public class CameraProcess {
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
 
-                // Preview keeps RATIO_4_3 for display compatibility
+                // Preview: let CameraX auto-select resolution based on PreviewView size
                 Preview preview = new Preview.Builder()
-                        .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                         .build();
                 CameraSelector selector = new CameraSelector.Builder()
                         .requireLensFacing(currentLensFacing).build();
