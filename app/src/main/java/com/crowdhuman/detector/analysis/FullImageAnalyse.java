@@ -167,7 +167,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Bitmap resultBitmap = renderer.render(recognitions, scaledW, scaledH,
                         modelToPreview, isFrontCamera, currentFps, offsetX, offsetY);
                 emitter.onNext(new AnalyseResult(now - start, resultBitmap, recognitions.size(),
-                        previewWidth, previewHeight, currentFps));
+                        previewWidth, previewHeight, currentFps, imgW, imgH));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
