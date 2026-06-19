@@ -17,6 +17,7 @@
     <string name="switch_camera_desc">Switch camera</string>
     <string name="screenshot_desc">Take screenshot</string>
     <string name="gallery_desc">Gallery detection</string>
+    <string name="rotate_desc">Rotate screen</string>
 
     <string-array name="model">
         <item>yolov5s</item>

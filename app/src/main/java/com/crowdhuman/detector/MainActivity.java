@@ -2,6 +2,7 @@ package com.crowdhuman.detector;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -58,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView cameraSwitchButton;
     private ImageView screenshotButton;
     private ImageView galleryButton;
+    private ImageView rotateButton;
     private CircularProgressIndicator loadingIndicator;
     private View errorPanel;
     private TextView errorText;
@@ -101,7 +103,8 @@ public class MainActivity extends AppCompatActivity {
         thresholdSeekBar = findViewById(R.id.threshold_seekbar);
         cameraSwitchButton = findViewById(R.id.camera_switch);
         screenshotButton = findViewById(R.id.screenshot);
-        galleryButton = findViewById(R.id.gallery);
+        galleryButton = findViewById(R.id.gallery_button);
+        rotateButton = findViewById(R.id.rotate_button);
         loadingIndicator = findViewById(R.id.loading_indicator);
         errorPanel = findViewById(R.id.error_panel);
         errorText = findViewById(R.id.error_text);
@@ -138,6 +141,8 @@ public class MainActivity extends AppCompatActivity {
 
         screenshotButton.setOnClickListener(v -> takeScreenshot());
         galleryButton.setOnClickListener(v -> Toast.makeText(this, "Gallery detection coming soon", Toast.LENGTH_SHORT).show());
+
+        rotateButton.setOnClickListener(v -> toggleOrientation());
 
         thresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             private float lastThreshold = -1f;
@@ -255,6 +260,16 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onSuccess() { Toast.makeText(MainActivity.this, "Screenshot saved", Toast.LENGTH_SHORT).show(); }
             @Override public void onError(String msg) { Toast.makeText(MainActivity.this, "Save failed: " + msg, Toast.LENGTH_SHORT).show(); }
         });
+    }
+
+    private void toggleOrientation() {
+        int currentOrientation = getRequestedOrientation();
+        if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                || currentOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        }
     }
 
     private void requestCameraPermission() {
