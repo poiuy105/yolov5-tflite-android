@@ -30,7 +30,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private int rotation;
     private final Yolov5TFLiteDetector detector;
     private final ImageProcess imageProcess;
-    private final boolean useFullScreenCrop;
     private final DetectionRenderer renderer;
     private final boolean isFrontCamera;
     private AnalyseCallback callback;
@@ -48,12 +47,11 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private int[] pooledRgbBytes;
 
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
-                           Yolov5TFLiteDetector detector, boolean useFullScreenCrop, boolean isFrontCamera) {
+                           Yolov5TFLiteDetector detector, boolean isFrontCamera) {
         this.previewView = previewView;
         this.rotation = rotation;
         this.detector = detector;
         this.imageProcess = new ImageProcess();
-        this.useFullScreenCrop = useFullScreenCrop;
         this.isFrontCamera = isFrontCamera;
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         this.renderer = new DetectionRenderer(dm.density);
@@ -116,7 +114,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
-                double scale = Math.max(
+                // FIT_CENTER: scale to fit within preview, preserving aspect ratio
+                double scale = Math.min(
                         previewHeight / (double) (rotation % 180 == 0 ? imgW : imgH),
                         previewWidth / (double) (rotation % 180 == 0 ? imgH : imgW));
                 int scaledW = (int) (scale * imgH), scaledH = (int) (scale * imgW);
@@ -127,7 +126,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 Matrix transform = imageProcess.getTransformationMatrix(imgW, imgH, scaledW, scaledH, rotation % 180 == 0 ? 90 : 0, false);
 
-                // Reuse or create fullImageBitmap
+                // Create fullImageBitmap at scaled size
                 if (pooledFullImageBitmap == null || pooledFullImageBitmap.getWidth() != scaledW || pooledFullImageBitmap.getHeight() != scaledH) {
                     if (pooledFullImageBitmap != null) pooledFullImageBitmap.recycle();
                     pooledFullImageBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888);
@@ -135,8 +134,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Canvas canvas = new Canvas(pooledFullImageBitmap);
                 canvas.drawBitmap(pooledImageBitmap, transform, null);
 
-                // Original logic: always crop previewWidth x previewHeight from (0,0)
-                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, previewWidth, previewHeight);
+                // Crop the actual image region (not black bars)
+                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, scaledW, scaledH);
 
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
                         cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
@@ -161,8 +160,12 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 lastFrameTime = now;
 
-                Bitmap resultBitmap = renderer.render(recognitions, previewWidth, previewHeight,
-                        modelToPreview, isFrontCamera, currentFps);
+                // Calculate black bar offsets for rendering
+                int offsetX = (previewWidth - scaledW) / 2;
+                int offsetY = (previewHeight - scaledH) / 2;
+
+                Bitmap resultBitmap = renderer.render(recognitions, scaledW, scaledH,
+                        modelToPreview, isFrontCamera, currentFps, offsetX, offsetY);
                 emitter.onNext(new AnalyseResult(now - start, resultBitmap, recognitions.size(),
                         previewWidth, previewHeight, currentFps));
 

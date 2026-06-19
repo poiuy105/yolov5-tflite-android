@@ -40,7 +40,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int[] ROTATION_OFFSETS = {0, 90, 270}; // direct, right, left
     private static final String[] ROTATION_LABELS = {"0°", "90°", "270°"};
 
-    private boolean isFullScreen = true; // Default: full screen
     private boolean isSpinnerInitialized = false;
     private int rotationOffsetIndex = 0; // 0=direct, 1=right, 2=left
     private FullImageAnalyse currentAnalyser;
@@ -51,7 +50,6 @@ public class MainActivity extends AppCompatActivity {
     private PreviewView cameraPreviewMatch;
     private ImageView boxLabelCanvas;
     private Spinner modelSpinner;
-    private com.google.android.material.switchmaterial.SwitchMaterial immersiveSwitch;
     private TextView inferenceTimeTextView;
     private TextView frameSizeTextView;
     private TextView detectCountTextView;
@@ -93,10 +91,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void bindViews() {
         cameraPreviewMatch = findViewById(R.id.camera_preview_match);
-        cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FILL_START);
+        cameraPreviewMatch.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         boxLabelCanvas = findViewById(R.id.box_label_canvas);
         modelSpinner = findViewById(R.id.model);
-        immersiveSwitch = findViewById(R.id.immersive);
         inferenceTimeTextView = findViewById(R.id.inference_time);
         frameSizeTextView = findViewById(R.id.frame_size);
         detectCountTextView = findViewById(R.id.detect_count);
@@ -122,15 +119,6 @@ public class MainActivity extends AppCompatActivity {
                 initModel(model);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        immersiveSwitch.setOnCheckedChangeListener((btn, checked) -> {
-            // checked=true: keep original aspect ratio (with black bars)
-            // checked=false: full screen fill (default)
-            isFullScreen = !checked;
-            // Only change scale type, do NOT restart camera
-            cameraPreviewMatch.setScaleType(
-                    isFullScreen ? PreviewView.ScaleType.FILL_START : PreviewView.ScaleType.FIT_CENTER);
         });
 
         cameraSwitchButton.setOnClickListener(v -> {
@@ -213,12 +201,8 @@ public class MainActivity extends AppCompatActivity {
         int rotation = DisplayUtils.getScreenOrientation(this);
         int effectiveRotation = (rotation + ROTATION_OFFSETS[rotationOffsetIndex]) % 360;
 
-        // Set preview scale type based on full screen mode
-        cameraPreviewMatch.setScaleType(
-                isFullScreen ? PreviewView.ScaleType.FILL_START : PreviewView.ScaleType.FIT_CENTER);
-
         currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, effectiveRotation,
-                detector, isFullScreen, cameraProcess.isFrontCamera());
+                detector, cameraProcess.isFrontCamera());
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
             public void onResult(AnalyseResult result) {

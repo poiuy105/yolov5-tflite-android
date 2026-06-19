@@ -53,9 +53,18 @@ public class DetectionRenderer {
         fpsPaint.setTypeface(Typeface.DEFAULT_BOLD);
     }
 
-    public Bitmap render(ArrayList<Recognition> recognitions, int width, int height,
+    public Bitmap render(ArrayList<Recognition> recognitions, int imageWidth, int imageHeight,
                          Matrix modelToPreviewTransform, boolean isFrontCamera, float fps) {
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        return render(recognitions, imageWidth, imageHeight, modelToPreviewTransform, isFrontCamera, fps, 0, 0);
+    }
+
+    public Bitmap render(ArrayList<Recognition> recognitions, int imageWidth, int imageHeight,
+                         Matrix modelToPreviewTransform, boolean isFrontCamera, float fps,
+                         int offsetX, int offsetY) {
+        // Canvas size = preview size (includes black bars)
+        int canvasWidth = imageWidth + offsetX * 2;
+        int canvasHeight = imageHeight + offsetY * 2;
+        Bitmap bitmap = Bitmap.createBitmap(canvasWidth, canvasHeight, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
 
         for (Recognition res : recognitions) {
@@ -65,18 +74,21 @@ public class DetectionRenderer {
             float confidence = res.getConfidence();
             modelToPreviewTransform.mapRect(location);
 
-            // Front camera: horizontal mirror
+            // Front camera: horizontal mirror (relative to image width)
             if (isFrontCamera) {
-                float left = width - location.right;
-                float right = width - location.left;
+                float left = imageWidth - location.right;
+                float right = imageWidth - location.left;
                 location.left = left;
                 location.right = right;
             }
 
-            location.left = Math.max(0, location.left);
-            location.top = Math.max(0, location.top);
-            location.right = Math.min(width, location.right);
-            location.bottom = Math.min(height, location.bottom);
+            // Apply black bar offset
+            location.offset(offsetX, offsetY);
+
+            location.left = Math.max(offsetX, location.left);
+            location.top = Math.max(offsetY, location.top);
+            location.right = Math.min(offsetX + imageWidth, location.right);
+            location.bottom = Math.min(offsetY + imageHeight, location.bottom);
 
             // Per-class color
             int color = CLASS_COLORS[Math.abs(res.getLabelId()) % CLASS_COLORS.length];
