@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
-    private static final String DEFAULT_MODEL = "yolov5s";
+    private static final String DEFAULT_MODEL = "yolov5n";
     private static final int ORIENTATION_AUTO = 0;
     private static final int ORIENTATION_PORTRAIT = 1;
     private static final int ORIENTATION_LANDSCAPE = 2;
