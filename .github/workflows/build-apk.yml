@@ -28,28 +28,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Download CrowdHuman TFLite model
-        run: |
-          wget -q --show-progress \
-            -O app/src/main/assets/crowdhuman_vbody_yolov5m.tflite \
-            "https://github.com/poiuy105/crowdhuman-yolov5m-tflite/releases/download/v1.0.0-tflite/crowdhuman_vbody_yolov5m.tflite" || \
-          curl -fsSL \
-            -o app/src/main/assets/crowdhuman_vbody_yolov5m.tflite \
-            "https://github.com/poiuy105/crowdhuman-yolov5m-tflite/releases/download/v1.0.0-tflite/crowdhuman_vbody_yolov5m.tflite"
-          ls -lh app/src/main/assets/crowdhuman_vbody_yolov5m.tflite
-          FILE_SIZE=$(stat -c%s app/src/main/assets/crowdhuman_vbody_yolov5m.tflite)
-          echo "Model file size: $FILE_SIZE bytes"
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "ERROR: Downloaded model file is too small"
-            exit 1
-          fi
-
-      - name: Verify model file exists in assets
+      - name: Verify model files exist in assets
         run: |
           echo "=== Assets files ==="
           ls -lh app/src/main/assets/*.tflite
-          echo "=== Checking crowdhuman model ==="
-          test -f app/src/main/assets/crowdhuman_vbody_yolov5m.tflite && echo "OK: crowdhuman model exists" || { echo "FAIL: crowdhuman model missing!"; exit 1; }
+          echo "=== Checking yolov5s model ==="
+          test -f app/src/main/assets/yolov5s-fp16-320-metadata.tflite && echo "OK: yolov5s model exists" || { echo "FAIL: yolov5s model missing!"; exit 1; }
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew

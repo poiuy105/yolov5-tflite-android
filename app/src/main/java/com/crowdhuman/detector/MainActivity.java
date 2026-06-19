@@ -36,7 +36,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 1001;
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1002;
-    private static final String DEFAULT_MODEL = "crowdhuman";
+    private static final String DEFAULT_MODEL = "yolov5s";
     private static final int[] ROTATION_OFFSETS = {0, 90, 270}; // direct, right, left
     private static final String[] ROTATION_LABELS = {"0°", "90°", "270°"};
 

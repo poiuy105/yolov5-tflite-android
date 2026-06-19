@@ -20,7 +20,6 @@
     <string name="rotate_desc">Rotate detection</string>
 
     <string-array name="model">
-        <item>crowdhuman</item>
         <item>yolov5s</item>
         <item>yolov5n</item>
         <item>yolov5m</item>

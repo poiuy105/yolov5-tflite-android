@@ -55,7 +55,6 @@ public class Yolov5TFLiteDetector {
         MODEL_CONFIGS.put("yolov5n", new ModelConfig("yolov5n", "yolov5n-fp16-320.tflite", "coco_label.txt", 80, false));
         MODEL_CONFIGS.put("yolov5m", new ModelConfig("yolov5m", "yolov5m-fp16-320.tflite", "coco_label.txt", 80, false));
         MODEL_CONFIGS.put("yolov5s-int8", new ModelConfig("yolov5s-int8", "yolov5s-int8-320.tflite", "coco_label.txt", 80, true));
-        MODEL_CONFIGS.put("crowdhuman", new ModelConfig("crowdhuman", "crowdhuman_vbody_yolov5m.tflite", "person_label.txt", 1, false));
     }
 
     private Interpreter tflite;
