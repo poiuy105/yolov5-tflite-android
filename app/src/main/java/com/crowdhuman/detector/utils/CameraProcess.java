@@ -35,9 +35,9 @@ public class CameraProcess {
     private static final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA"};
     private int currentLensFacing = CameraSelector.LENS_FACING_BACK;
 
-    // Target analysis resolution - must be small for low-end devices
-    private static final int TARGET_ANALYSIS_WIDTH = 320;
-    private static final int TARGET_ANALYSIS_HEIGHT = 240;
+    // Target analysis resolution - 640x480 for better detail while keeping performance
+    private static final int TARGET_ANALYSIS_WIDTH = 640;
+    private static final int TARGET_ANALYSIS_HEIGHT = 480;
 
     public boolean allPermissionsGranted(Context context) {
         for (String permission : REQUIRED_PERMISSIONS) {

@@ -102,7 +102,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Safety: if CameraX returns an unreasonably large frame, downscale immediately.
                 // This prevents CPU bottleneck on rotate/letterbox operations.
-                final int MAX_CAMERA_DIM = 480;
+                final int MAX_CAMERA_DIM = 960;
                 if (imgW > MAX_CAMERA_DIM || imgH > MAX_CAMERA_DIM) {
                     Log.w("FullImageAnalyse", "Camera frame too large: " + imgW + "x" + imgH
                             + ", downscaling to fit " + MAX_CAMERA_DIM + "px");
@@ -237,6 +237,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
                         recognitions, frameToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
+                        modelSize,
                         timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
                         timeNmsMs, timeLabelMs, timeMapMs, timeOverlayMs));
