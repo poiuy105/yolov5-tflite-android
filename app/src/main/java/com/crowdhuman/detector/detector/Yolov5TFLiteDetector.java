@@ -296,8 +296,14 @@ public class Yolov5TFLiteDetector {
     private void addBestDelegate() {
         if (options == null) return;
 
-        // 1. Try NNAPI with DSP acceleration (Android 8.1+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        // NOTE: NNAPI delegate disabled globally due to Native SIGSEGV on
+        // Android 16 (Redmi/HyperOS). NNAPI causes crashes in
+        // NativeInterpreterWrapper_run regardless of input method (zero-copy
+        // or TensorBuffer). GPU and CPU delegates work correctly.
+        // To re-enable: set ENABLE_NNAPI = true below.
+        final boolean ENABLE_NNAPI = false;
+
+        if (ENABLE_NNAPI && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 nnApiDelegate = new NnApiDelegate();
                 options.addDelegate(nnApiDelegate);
@@ -309,7 +315,7 @@ public class Yolov5TFLiteDetector {
             }
         }
 
-        // 2. Try GPU Delegate
+        // 1. Try GPU Delegate
         CompatibilityList compat = new CompatibilityList();
         if (compat.isDelegateSupportedOnThisDevice()) {
             gpuDelegate = new GpuDelegate(compat.getBestOptionsForThisDevice());
@@ -318,7 +324,7 @@ public class Yolov5TFLiteDetector {
             return;
         }
 
-        // 3. CPU fallback: low-end devices benefit from fewer threads
+        // 2. CPU fallback: low-end devices benefit from fewer threads
         options.setNumThreads(Runtime.getRuntime().availableProcessors() > 4 ? 4 : 2);
         Log.i("tfliteSupport", "using CPU with " + options.getNumThreads() + " threads.");
     }
