@@ -6,8 +6,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -26,6 +24,7 @@ import androidx.core.content.ContextCompat;
 
 import com.crowdhuman.detector.analysis.AnalyseCallback;
 import com.crowdhuman.detector.analysis.AnalyseResult;
+import com.crowdhuman.detector.analysis.DetectionOverlayView;
 import com.crowdhuman.detector.analysis.FullImageAnalyse;
 import com.crowdhuman.detector.detector.DetectorCallback;
 import com.crowdhuman.detector.detector.Yolov5TFLiteDetector;
@@ -53,7 +52,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Views
     private PreviewView cameraPreviewMatch;
-    private ImageView boxLabelCanvas;
+    private DetectionOverlayView boxLabelCanvas;
     private Spinner modelSpinner;
     private TextView inferenceTimeTextView;
     private TextView frameSizeTextView;
@@ -216,9 +215,10 @@ public class MainActivity extends AppCompatActivity {
 
         detector.initialModel(this, new DetectorCallback() {
             @Override public void onModelLoaded(String file) {
-                loadingIndicator.setVisibility(View.GONE);
-                startCameraWithCurrentMode();
-            }
+                    loadingIndicator.setVisibility(View.GONE);
+                    detector.initInputBuffer();
+                    startCameraWithCurrentMode();
+                }
             @Override public void onModelError(String msg) {
                 loadingIndicator.setVisibility(View.GONE);
                 showError(msg);
@@ -242,14 +242,21 @@ public class MainActivity extends AppCompatActivity {
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
             public void onResult(AnalyseResult result) {
-                if (result.resultBitmap != null) {
-                    boxLabelCanvas.setImageBitmap(result.resultBitmap);
+                if (result.recognitions != null) {
+                    boxLabelCanvas.updateResults(
+                            result.recognitions,
+                            result.frameToPreviewTransform,
+                            result.isFrontCamera,
+                            result.fps,
+                            result.offsetX,
+                            result.offsetY,
+                            result.renderWidth,
+                            result.renderHeight);
                 }
                 frameSizeTextView.setText(result.imageHeight + "x" + result.imageWidth);
                 inferenceTimeTextView.setText(result.costTimeMs + "ms (infer " + result.inferenceTimeMs + "ms)");
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
-                // Debug info
                 Log.d("MainActivity", "Debug: " + result.debugInfo);
                 if (result.firstBox != null) {
                     Log.d("MainActivity", "First box: " + result.firstBox.toShortString());
@@ -270,16 +277,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void takeScreenshot() {
-        // Merge camera preview + detection overlay
         Bitmap cameraBmp = cameraPreviewMatch.getBitmap();
-        Drawable overlay = boxLabelCanvas.getDrawable();
-        if (cameraBmp == null || !(overlay instanceof BitmapDrawable)) {
+        if (cameraBmp == null) {
             Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show();
             return;
         }
-        Bitmap overlayBmp = ((BitmapDrawable) overlay).getBitmap();
 
-        // P0-4 FIX: Wrap Bitmap.createBitmap in try-catch for OOM
         Bitmap merged = null;
         try {
             merged = Bitmap.createBitmap(cameraBmp.getWidth(), cameraBmp.getHeight(), Bitmap.Config.ARGB_8888);
@@ -289,7 +292,7 @@ public class MainActivity extends AppCompatActivity {
         }
         Canvas canvas = new Canvas(merged);
         canvas.drawBitmap(cameraBmp, 0, 0, null);
-        canvas.drawBitmap(overlayBmp, 0, 0, null);
+        boxLabelCanvas.draw(canvas);
 
         ScreenshotUtils.saveToGallery(this, merged, new ScreenshotUtils.SaveCallback() {
             @Override public void onSuccess() { Toast.makeText(MainActivity.this, "Screenshot saved", Toast.LENGTH_SHORT).show(); }

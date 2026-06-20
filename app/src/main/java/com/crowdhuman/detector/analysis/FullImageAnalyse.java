@@ -6,7 +6,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.RectF;
-import android.util.DisplayMetrics;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -32,7 +31,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private final int rotation;
     private final Yolov5TFLiteDetector detector;
     private final ImageProcess imageProcess;
-    private final DetectionRenderer renderer;
     private final boolean isFrontCamera;
     private AnalyseCallback callback;
     private Disposable currentDisposable;
@@ -43,10 +41,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private volatile float currentFps = 0;
     private static final float FPS_ALPHA = 0.9f;
 
-    // Bitmap pool for reuse (reduce GC pressure)
-    private Bitmap pooledImageBitmap;
-    // P2-15 FIX: Reuse rgbBytes array to reduce GC pressure
-    private int[] pooledRgbBytes;
+    // Pre-allocated Bitmaps for reuse (avoid per-frame allocation)
+    private Bitmap reusedRotatedBitmap;
+    private Bitmap reusedLetterboxBitmap;
 
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
                            Yolov5TFLiteDetector detector, boolean isFrontCamera) {
@@ -55,8 +52,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         this.detector = detector;
         this.imageProcess = new ImageProcess();
         this.isFrontCamera = isFrontCamera;
-        DisplayMetrics dm = context.getResources().getDisplayMetrics();
-        this.renderer = new DetectionRenderer(dm.density);
     }
 
     public void setCallback(AnalyseCallback callback) {
@@ -67,10 +62,32 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         this.enabledLabels = labels;
     }
 
+    private void ensureRotatedBitmap(int w, int h) {
+        if (reusedRotatedBitmap == null || reusedRotatedBitmap.getWidth() != w || reusedRotatedBitmap.getHeight() != h) {
+            if (reusedRotatedBitmap != null) reusedRotatedBitmap.recycle();
+            reusedRotatedBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        }
+    }
+
+    private void ensureLetterboxBitmap(int size) {
+        if (reusedLetterboxBitmap == null || reusedLetterboxBitmap.getWidth() != size) {
+            if (reusedLetterboxBitmap != null) reusedLetterboxBitmap.recycle();
+            reusedLetterboxBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        }
+    }
+
     public void dispose() {
         if (currentDisposable != null && !currentDisposable.isDisposed()) {
             currentDisposable.dispose();
             currentDisposable = null;
+        }
+        if (reusedRotatedBitmap != null) {
+            reusedRotatedBitmap.recycle();
+            reusedRotatedBitmap = null;
+        }
+        if (reusedLetterboxBitmap != null) {
+            reusedLetterboxBitmap.recycle();
+            reusedLetterboxBitmap = null;
         }
     }
 
@@ -84,38 +101,24 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
         currentDisposable = Observable.create((ObservableEmitter<AnalyseResult> emitter) -> {
             long start = System.currentTimeMillis();
-            Bitmap modelInputBitmap = null;
 
             try {
-                byte[][] yuvBytes = new byte[3][];
-                ImageProxy.PlaneProxy[] planes = image.getPlanes();
-                int imgH = image.getHeight(), imgW = image.getWidth();
-                imageProcess.fillBytes(planes, yuvBytes);
-                int yRowStride = planes[0].getRowStride();
-                int uvRowStride = planes[1].getRowStride();
-                int uvPixelStride = planes[1].getPixelStride();
-
-                if (pooledRgbBytes == null || pooledRgbBytes.length != imgH * imgW) {
-                    pooledRgbBytes = new int[imgH * imgW];
-                }
-                imageProcess.YUV420ToARGB8888(yuvBytes[0], yuvBytes[1], yuvBytes[2],
-                        imgW, imgH, yRowStride, uvRowStride, uvPixelStride, pooledRgbBytes);
-
-                // Reuse or create imageBitmap
-                if (pooledImageBitmap == null || pooledImageBitmap.getWidth() != imgW || pooledImageBitmap.getHeight() != imgH) {
-                    if (pooledImageBitmap != null) pooledImageBitmap.recycle();
-                    pooledImageBitmap = Bitmap.createBitmap(imgW, imgH, Bitmap.Config.ARGB_8888);
-                }
-                pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
+                // RGBA_8888 direct output from CameraX - no YUV conversion needed
+                Bitmap cameraBitmap = image.toBitmap();
+                int imgW = cameraBitmap.getWidth();
+                int imgH = cameraBitmap.getHeight();
 
                 // Rotate camera frame to match screen orientation (portrait)
                 // Camera sensor is landscape (640x480), screen is portrait (480x640)
                 // Use getTransformationMatrix for correct center-based rotation
                 Matrix rotateMatrix = imageProcess.getTransformationMatrix(
                         imgW, imgH, imgH, imgW, 90, false);
-                Bitmap rotatedBitmap = Bitmap.createBitmap(pooledImageBitmap, 0, 0, imgW, imgH, rotateMatrix, false);
-                int rotW = rotatedBitmap.getWidth();  // 480
-                int rotH = rotatedBitmap.getHeight(); // 640
+                // Rotate using pre-allocated bitmap via Canvas drawBitmap
+                ensureRotatedBitmap(imgH, imgW);
+                Canvas rotCanvas = new Canvas(reusedRotatedBitmap);
+                rotCanvas.drawBitmap(cameraBitmap, rotateMatrix, null);
+                int rotW = reusedRotatedBitmap.getWidth();
+                int rotH = reusedRotatedBitmap.getHeight();
 
                 // Step 1: Direct letterbox from rotated camera frame to 320x320
                 int modelSize = detector.getInputSize().getWidth(); // 320
@@ -127,21 +130,21 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 int padX = (modelSize - letterW) / 2;
                 int padY = (modelSize - letterH) / 2;
 
-                modelInputBitmap = Bitmap.createBitmap(modelSize, modelSize, Bitmap.Config.ARGB_8888);
-                Canvas letterCanvas = new Canvas(modelInputBitmap);
+                ensureLetterboxBitmap(modelSize);
+                Canvas letterCanvas = new Canvas(reusedLetterboxBitmap);
                 letterCanvas.drawColor(Color.GRAY);
 
                 Matrix letterMatrix = new Matrix();
                 letterMatrix.postScale(letterScale, letterScale);
                 letterMatrix.postTranslate(padX, padY);
-                letterCanvas.drawBitmap(rotatedBitmap, letterMatrix, null);
+                letterCanvas.drawBitmap(reusedRotatedBitmap, letterMatrix, null);
 
                 // Step 2: Detect
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
                 long inferenceStart = System.currentTimeMillis();
-                ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
+                ArrayList<Recognition> recognitions = detector.detectZeroCopy(reusedLetterboxBitmap);
                 long inferenceTimeMs = System.currentTimeMillis() - inferenceStart;
 
                 // Step 3: Map detection boxes back to rotated frame coordinates
@@ -170,9 +173,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 frameToPreview.postScale((float) previewScale, (float) previewScale);
                 // No translate here - renderer handles offset via offsetX/offsetY
 
-                // Step 5: Render detection boxes on preview-sized canvas
-                Bitmap resultBitmap = renderer.render(recognitions, renderW, renderH,
-                        frameToPreview, isFrontCamera, currentFps, offsetX, offsetY);
+                // Step 5: Rendering handled by DetectionOverlayView (no Bitmap needed)
 
                 // Debug info
                 String debugInfo = String.format(
@@ -191,14 +192,14 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 lastFrameTime = now;
 
-                emitter.onNext(new AnalyseResult(now - start, inferenceTimeMs, resultBitmap, recognitions.size(),
-                        previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox));
+                emitter.onNext(new AnalyseResult(now - start, inferenceTimeMs, null, recognitions.size(),
+                        previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
+                        recognitions, frameToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
                 emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
             } finally {
-                if (modelInputBitmap != null && !modelInputBitmap.isRecycled()) modelInputBitmap.recycle();
                 image.close();
             }
         }).subscribeOn(Schedulers.io())

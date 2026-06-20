@@ -14,7 +14,7 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintLeft_toLeftOf="parent"/>
 
-    <ImageView
+    <com.crowdhuman.detector.analysis.DetectionOverlayView
         android:id="@+id/box_label_canvas"
         android:layout_width="match_parent"
         android:layout_height="match_parent"

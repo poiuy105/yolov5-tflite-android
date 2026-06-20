@@ -58,8 +58,8 @@ public class CameraProcess {
      * 640x480 is a good balance: fast preprocessing, negligible accuracy impact
      * since model input is only 320x320.
      */
-    private static final int MAX_ANALYSIS_WIDTH = 640;
-    private static final int MAX_ANALYSIS_HEIGHT = 480;
+    private static final int MAX_ANALYSIS_WIDTH = 320;
+    private static final int MAX_ANALYSIS_HEIGHT = 240;
 
     private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
         CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
@@ -128,6 +128,7 @@ public class CameraProcess {
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                         .setTargetResolution(maxSize)
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
