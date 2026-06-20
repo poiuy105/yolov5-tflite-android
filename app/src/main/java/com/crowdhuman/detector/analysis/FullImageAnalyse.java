@@ -172,32 +172,44 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t3 = System.currentTimeMillis();
 
                 // === Stage 5: Map coordinates ===
-                // Step A: letterbox coords -> rotated frame coords (portrait, 240x320)
-                // Remove padding, then undo scale
-                Matrix modelToRotated = new Matrix();
-                modelToRotated.postTranslate(-padX, -padY);
-                modelToRotated.postScale(1f / scale, 1f / scale);
+                // Use combinedMatrix.invert() to map letterbox coords back to camera coords,
+                // then apply preview transform (rotate 90° + scale to preview).
+                Matrix modelToCamera = new Matrix();
+                boolean invertOk = combinedMatrix.invert(modelToCamera);
+                if (!invertOk) {
+                    Log.w("FullImageAnalyse", "Matrix inversion failed!");
+                }
 
-                // Step B: rotated frame coords -> preview coords
-                // Rotated frame is portrait (rotW x rotH = imgH x imgW)
-                int rotW = imgH;  // after 90° rotation, width = original height
-                int rotH = imgW;  // after 90° rotation, height = original width
-                double previewScale = Math.min(
-                        previewHeight / (double) rotH,
-                        previewWidth / (double) rotW);
-                int renderW = (int) (previewScale * rotW);
-                int renderH = (int) (previewScale * rotH);
+                // Camera (640x480 landscape) -> Preview (portrait)
+                // CameraX preview rotates the image 90° to display upright.
+                // So camera(x,y) maps to preview(y*scale, x*scale) after rotation.
+                float previewScale = Math.min(
+                        previewWidth / (float) imgH,   // preview width / camera height (after rotation)
+                        previewHeight / (float) imgW); // preview height / camera width (after rotation)
+                int renderW = (int) (previewScale * imgH);  // after 90° rotation, camera height becomes width
+                int renderH = (int) (previewScale * imgW);  // after 90° rotation, camera width becomes height
                 int offsetX = (previewWidth - renderW) / 2;
                 int offsetY = (previewHeight - renderH) / 2;
 
-                Matrix frameToPreview = new Matrix();
-                frameToPreview.postScale((float) previewScale, (float) previewScale);
+                // Build camera -> preview transform:
+                // 1. Rotate 90° (landscape -> portrait)
+                // 2. Scale to preview
+                // 3. Translate to center
+                Matrix cameraToPreview = new Matrix();
+                // Rotate around camera center
+                cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
+                cameraToPreview.postRotate(90);
+                cameraToPreview.postTranslate(imgH / 2f, imgW / 2f);
+                // Scale to preview
+                cameraToPreview.postScale(previewScale, previewScale);
+                // Center in preview
+                cameraToPreview.postTranslate(offsetX, offsetY);
 
-                // Apply both transforms to each detection box
+                // Apply: letterbox -> camera -> preview
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
-                    modelToRotated.mapRect(loc);
-                    frameToPreview.mapRect(loc);
+                    modelToCamera.mapRect(loc);
+                    cameraToPreview.mapRect(loc);
                     r.setLocation(loc);
                 }
                 t4 = System.currentTimeMillis();
