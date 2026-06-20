@@ -155,30 +155,34 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t3 = System.currentTimeMillis();
 
                 // === Stage 5: Map coordinates ===
-                // Use matrix inversion for accurate coordinate mapping
-                Matrix modelToCamera = new Matrix();
-                boolean invertOk = combinedMatrix.invert(modelToCamera);
-                if (!invertOk) {
-                    Log.w("FullImageAnalyse", "Matrix inversion failed, using fallback mapping");
-                }
+                // Step A: letterbox coords -> rotated frame coords (portrait, 240x320)
+                // Remove padding, then undo scale
+                Matrix modelToRotated = new Matrix();
+                modelToRotated.postTranslate(-padX, -padY);
+                modelToRotated.postScale(1f / scale, 1f / scale);
 
-                for (Recognition r : recognitions) {
-                    RectF loc = r.getLocation();
-                    modelToCamera.mapRect(loc);
-                    r.setLocation(loc);
-                }
-
-                // Preview mapping (camera coords -> preview coords)
+                // Step B: rotated frame coords -> preview coords
+                // Rotated frame is portrait (rotW x rotH = imgH x imgW)
+                int rotW = imgH;  // after 90° rotation, width = original height
+                int rotH = imgW;  // after 90° rotation, height = original width
                 double previewScale = Math.min(
-                        previewHeight / (double) imgH,
-                        previewWidth / (double) imgW);
-                int renderW = (int) (previewScale * imgW);
-                int renderH = (int) (previewScale * imgH);
+                        previewHeight / (double) rotH,
+                        previewWidth / (double) rotW);
+                int renderW = (int) (previewScale * rotW);
+                int renderH = (int) (previewScale * rotH);
                 int offsetX = (previewWidth - renderW) / 2;
                 int offsetY = (previewHeight - renderH) / 2;
 
                 Matrix frameToPreview = new Matrix();
                 frameToPreview.postScale((float) previewScale, (float) previewScale);
+
+                // Apply both transforms to each detection box
+                for (Recognition r : recognitions) {
+                    RectF loc = r.getLocation();
+                    modelToRotated.mapRect(loc);
+                    frameToPreview.mapRect(loc);
+                    r.setLocation(loc);
+                }
                 t4 = System.currentTimeMillis();
                 long timeMapMs = t4 - t3;
 
