@@ -17,21 +17,28 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ultralytics tensorflow-cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install onnx onnx-simplifier onnxruntime
+          pip install tensorflow-cpu
 
-      - name: Download YOLOv5n weights and export to TFLite 160x160
+      - name: Clone YOLOv5 and export model
         run: |
-          python -c "
-          from ultralytics import YOLO
-          model = YOLO('yolov5n.pt')
-          model.export(format='tflite', imgsz=160, half=True)
-          "
+          git clone https://github.com/ultralytics/yolov5.git --depth 1
+          cd yolov5
+          python export.py --weights yolov5n.pt --img-size 160 --batch-size 1 --include tflite --half
+          cd ..
 
       - name: Move and verify exported model
         run: |
-          cp yolov5nu_saved_model/yolov5nu_float16.tflite ./yolov5n-fp16-160.tflite
+          find yolov5 -name '*160*tflite*' -o -name '*fp16*tflite*' | head -10
+          EXPORTED=$(find yolov5 -name '*float16*tflite*' -o -name '*fp16*tflite*' 2>/dev/null | head -1)
+          if [ -z "$EXPORTED" ]; then
+            EXPORTED=$(find yolov5 -name 'yolov5n*tflite*' | head -1)
+          fi
+          if [ -n "$EXPORTED" ]; then
+            cp "$EXPORTED" ./yolov5n-fp16-160.tflite
+          fi
           ls -la yolov5n-fp16-160.tflite
-          file yolov5n-fp16-160.tflite
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
