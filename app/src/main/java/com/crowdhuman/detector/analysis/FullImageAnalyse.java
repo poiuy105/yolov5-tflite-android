@@ -150,7 +150,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
+                long inferenceStart = System.currentTimeMillis();
                 ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
+                long inferenceTimeMs = System.currentTimeMillis() - inferenceStart;
 
                 // Calculate FPS
                 long now = System.currentTimeMillis();
@@ -160,13 +162,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 lastFrameTime = now;
 
-                // Calculate black bar offsets for rendering
-                int offsetX = (previewWidth - scaledW) / 2;
-                int offsetY = (previewHeight - scaledH) / 2;
-
                 Bitmap resultBitmap = renderer.render(recognitions, scaledW, scaledH,
-                        modelToPreview, isFrontCamera, currentFps, offsetX, offsetY);
-                emitter.onNext(new AnalyseResult(now - start, resultBitmap, recognitions.size(),
+                        modelToPreview, isFrontCamera, currentFps);
+                emitter.onNext(new AnalyseResult(now - start, inferenceTimeMs, resultBitmap, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH));
 
             } catch (Exception e) {

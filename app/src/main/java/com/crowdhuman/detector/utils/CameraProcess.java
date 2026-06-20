@@ -53,9 +53,15 @@ public class CameraProcess {
     }
 
     /**
-     * Query the maximum YUV_420_888 analysis resolution for the given lens facing
-     * using Camera2 CameraCharacteristics.
+     * Query the largest YUV_420_888 analysis resolution capped at 1280x960.
+     * Using the full sensor resolution (e.g. 4032x3024) causes severe CPU bottleneck
+     * in YUV→RGB conversion (~12M pixels per frame). Capping at 1280x960 (~1.2M pixels)
+     * reduces conversion time by ~10x with negligible impact on detection accuracy
+     * since the model input is only 320x320.
      */
+    private static final int MAX_ANALYSIS_WIDTH = 1280;
+    private static final int MAX_ANALYSIS_HEIGHT = 960;
+
     private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
         CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         try {
@@ -68,24 +74,38 @@ public class CameraProcess {
                     android.util.Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
                     if (sizes == null || sizes.length == 0) continue;
 
-                    // Pick the largest resolution by total pixel count
-                    android.util.Size max = sizes[0];
+                    // Pick the largest resolution that does not exceed MAX_ANALYSIS dimensions
+                    android.util.Size best = null;
                     for (android.util.Size s : sizes) {
-                        if (s.getWidth() * s.getHeight() > max.getWidth() * max.getHeight()) {
-                            max = s;
+                        if (s.getWidth() <= MAX_ANALYSIS_WIDTH && s.getHeight() <= MAX_ANALYSIS_HEIGHT) {
+                            if (best == null || s.getWidth() * s.getHeight() > best.getWidth() * best.getHeight()) {
+                                best = s;
+                            }
                         }
                     }
-                    Log.i("CameraProcess", "Max analysis resolution for facing=" + lensFacing
-                            + ": " + max.getWidth() + "x" + max.getHeight());
-                    return max;
+                    if (best != null) {
+                        Log.i("CameraProcess", "Selected analysis resolution for facing=" + lensFacing
+                                + ": " + best.getWidth() + "x" + best.getHeight());
+                        return best;
+                    }
+                    // If no resolution fits within cap, pick the smallest available
+                    android.util.Size min = sizes[0];
+                    for (android.util.Size s : sizes) {
+                        if (s.getWidth() * s.getHeight() < min.getWidth() * min.getHeight()) {
+                            min = s;
+                        }
+                    }
+                    Log.w("CameraProcess", "No resolution within cap, using smallest: "
+                            + min.getWidth() + "x" + min.getHeight());
+                    return min;
                 }
             }
         } catch (CameraAccessException e) {
             Log.e("CameraProcess", "Failed to query camera resolutions", e);
         }
         // Fallback
-        Log.w("CameraProcess", "Could not query max resolution, using fallback 1920x1080");
-        return new android.util.Size(1920, 1080);
+        Log.w("CameraProcess", "Could not query resolution, using fallback 1280x960");
+        return new android.util.Size(1280, 960);
     }
 
     public void startCamera(Context context, ImageAnalysis.Analyzer analyzer, PreviewView previewView) {

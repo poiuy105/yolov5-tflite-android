@@ -55,7 +55,52 @@ public class DetectionRenderer {
 
     public Bitmap render(ArrayList<Recognition> recognitions, int imageWidth, int imageHeight,
                          Matrix modelToPreviewTransform, boolean isFrontCamera, float fps) {
-        return render(recognitions, imageWidth, imageHeight, modelToPreviewTransform, isFrontCamera, fps, 0, 0);
+        Bitmap bitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        for (Recognition res : recognitions) {
+            // P1-7 FIX: Copy location to avoid mutating the original Recognition object
+            RectF location = new RectF(res.getLocation());
+            String label = res.getLabelName();
+            float confidence = res.getConfidence();
+            modelToPreviewTransform.mapRect(location);
+
+            // Front camera: horizontal mirror (relative to image width)
+            if (isFrontCamera) {
+                float left = imageWidth - location.right;
+                float right = imageWidth - location.left;
+                location.left = left;
+                location.right = right;
+            }
+
+            location.left = Math.max(0, location.left);
+            location.top = Math.max(0, location.top);
+            location.right = Math.min(imageWidth, location.right);
+            location.bottom = Math.min(imageHeight, location.bottom);
+
+            // Per-class color
+            int color = CLASS_COLORS[Math.abs(res.getLabelId()) % CLASS_COLORS.length];
+            boxPaint.setColor(color);
+
+            canvas.drawRect(location, boxPaint);
+
+            String text = label + ":" + String.format(Locale.US, "%.2f", confidence);
+            float textWidth = textPaint.measureText(text);
+            float textHeight = textPaint.getTextSize();
+            float textX = location.left;
+            float textY = location.top > textHeight ? location.top : location.top + textHeight;
+
+            canvas.drawRect(textX - 2 * textScale, textY - textHeight - 2 * textScale,
+                    textX + textWidth + 4 * textScale, textY + 2 * textScale, textBgPaint);
+            canvas.drawText(text, textX, textY, textPaint);
+        }
+
+        // Draw FPS
+        if (fps > 0) {
+            canvas.drawText(String.format(Locale.US, "FPS: %.1f", fps), 10 * textScale, 24 * textScale, fpsPaint);
+        }
+
+        return bitmap;
     }
 
     public Bitmap render(ArrayList<Recognition> recognitions, int imageWidth, int imageHeight,

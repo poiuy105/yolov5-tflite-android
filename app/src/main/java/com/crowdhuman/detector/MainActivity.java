@@ -246,7 +246,7 @@ public class MainActivity extends AppCompatActivity {
                     boxLabelCanvas.setImageBitmap(result.resultBitmap);
                 }
                 frameSizeTextView.setText(result.imageHeight + "x" + result.imageWidth);
-                inferenceTimeTextView.setText(result.costTimeMs + "ms");
+                inferenceTimeTextView.setText(result.costTimeMs + "ms (infer " + result.inferenceTimeMs + "ms)");
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
             }

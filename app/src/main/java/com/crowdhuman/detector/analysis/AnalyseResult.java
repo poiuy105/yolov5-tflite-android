@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 
 public class AnalyseResult {
     public final long costTimeMs;
+    public final long inferenceTimeMs;
     public final Bitmap resultBitmap;
     public final int detectCount;
     public final int frameWidth;
@@ -14,12 +15,13 @@ public class AnalyseResult {
 
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
-        this(costTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0);
+        this(costTimeMs, 0, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0);
     }
 
-    public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
+    public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight) {
         this.costTimeMs = costTimeMs;
+        this.inferenceTimeMs = inferenceTimeMs;
         this.resultBitmap = resultBitmap;
         this.detectCount = detectCount;
         this.frameWidth = frameWidth;
