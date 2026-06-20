@@ -136,7 +136,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
                         cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
-                        detector.getInputSize().getWidth(), detector.getInputSize().getHeight(), 0, false);
+                        detector.getInputSize().getWidth(), detector.getInputSize().getHeight(), 0, true);
                 modelInputBitmap = Bitmap.createBitmap(cropImageBitmap, 0, 0,
                         cropImageBitmap.getWidth(), cropImageBitmap.getHeight(), previewToModel, false);
 
