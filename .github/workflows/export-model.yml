@@ -1,0 +1,39 @@
+name: Export YOLOv5n 160x160 TFLite Model
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export-model:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install ultralytics
+
+      - name: Download YOLOv5n weights and export to TFLite 160x160
+        run: |
+          python -c "
+          from ultralytics import YOLO
+          model = YOLO('yolov5n.pt')
+          model.export(format='tflite', imgsz=160, half=True)
+          "
+
+      - name: Move exported model
+        run: |
+          find . -name "yolov5n-fp16-160.tflite" -exec cp {} ./yolov5n-fp16-160.tflite \;
+          ls -la yolov5n-fp16-160.tflite
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolov5n-160-model
+          path: yolov5n-fp16-160.tflite
