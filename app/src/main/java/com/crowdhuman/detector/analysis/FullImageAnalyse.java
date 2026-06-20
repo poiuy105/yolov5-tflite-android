@@ -110,8 +110,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Rotate camera frame to match screen orientation (portrait)
                 // Camera sensor is landscape (640x480), screen is portrait (480x640)
-                Matrix rotateMatrix = new Matrix();
-                rotateMatrix.postRotate(90);
+                // Use getTransformationMatrix for correct center-based rotation
+                Matrix rotateMatrix = imageProcess.getTransformationMatrix(
+                        imgW, imgH, imgH, imgW, 90, false);
                 Bitmap rotatedBitmap = Bitmap.createBitmap(pooledImageBitmap, 0, 0, imgW, imgH, rotateMatrix, false);
                 int rotW = rotatedBitmap.getWidth();  // 480
                 int rotH = rotatedBitmap.getHeight(); // 640
