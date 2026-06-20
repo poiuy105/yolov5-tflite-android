@@ -19,7 +19,7 @@ jobs:
         run: |
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install onnx onnx-simplifier onnxruntime
-          pip install tensorflow-cpu
+          pip install tensorflow-cpu pandas pyyaml tqdm requests
 
       - name: Clone YOLOv5 and export model
         run: |
