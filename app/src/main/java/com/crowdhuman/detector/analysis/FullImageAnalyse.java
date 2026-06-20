@@ -41,8 +41,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     private volatile float currentFps = 0;
     private static final float FPS_ALPHA = 0.9f;
 
-    // Pre-allocated Bitmaps for reuse (avoid per-frame allocation)
-    private Bitmap reusedRotatedBitmap;
+    // Pre-allocated Bitmap for letterbox (avoid per-frame allocation)
     private Bitmap reusedLetterboxBitmap;
 
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
@@ -62,13 +61,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         this.enabledLabels = labels;
     }
 
-    private void ensureRotatedBitmap(int w, int h) {
-        if (reusedRotatedBitmap == null || reusedRotatedBitmap.getWidth() != w || reusedRotatedBitmap.getHeight() != h) {
-            if (reusedRotatedBitmap != null) reusedRotatedBitmap.recycle();
-            reusedRotatedBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        }
-    }
-
     private void ensureLetterboxBitmap(int size) {
         if (reusedLetterboxBitmap == null || reusedLetterboxBitmap.getWidth() != size) {
             if (reusedLetterboxBitmap != null) reusedLetterboxBitmap.recycle();
@@ -80,10 +72,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         if (currentDisposable != null && !currentDisposable.isDisposed()) {
             currentDisposable.dispose();
             currentDisposable = null;
-        }
-        if (reusedRotatedBitmap != null) {
-            reusedRotatedBitmap.recycle();
-            reusedRotatedBitmap = null;
         }
         if (reusedLetterboxBitmap != null) {
             reusedLetterboxBitmap.recycle();
@@ -103,7 +91,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             long start = System.currentTimeMillis();
 
             // Per-stage timing variables
-            long t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+            long t0, t1, t2, t3, t4, t5;
 
             try {
                 // === Stage 1: CameraX toBitmap ===
@@ -114,89 +102,104 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
-                // === Stage 2: Rotate ===
-                Matrix rotateMatrix = imageProcess.getTransformationMatrix(
-                        imgW, imgH, imgH, imgW, 90, false);
-                ensureRotatedBitmap(imgH, imgW);
-                Canvas rotCanvas = new Canvas(reusedRotatedBitmap);
-                rotCanvas.drawBitmap(cameraBitmap, rotateMatrix, null);
-                int rotW = reusedRotatedBitmap.getWidth();
-                int rotH = reusedRotatedBitmap.getHeight();
-                t2 = System.currentTimeMillis();
-                long timeRotateMs = t2 - t1;
-
-                // === Stage 3: Letterbox ===
+                // === Stage 2+3: Combined rotate + letterbox in ONE drawBitmap ===
+                // Instead of: camera -> rotateBitmap -> letterboxBitmap (2 draws)
+                // We do: camera -> letterboxBitmap (1 draw with combined matrix)
                 int modelSize = detector.getInputSize().getWidth();
-                float letterScale = Math.min(
-                        modelSize / (float) rotW,
-                        modelSize / (float) rotH);
-                int letterW = (int) (rotW * letterScale);
-                int letterH = (int) (rotH * letterScale);
-                int padX = (modelSize - letterW) / 2;
-                int padY = (modelSize - letterH) / 2;
+
+                // Camera frame is landscape (e.g. 320x240), screen is portrait
+                // We need to: rotate 90° + scale to fit 320x320 + add gray padding
+                // Combined transform: rotate around center -> scale -> translate to fit
+                float scale = Math.min(
+                        modelSize / (float) imgH,  // after rotation, width becomes imgH
+                        modelSize / (float) imgW); // after rotation, height becomes imgW
+                int scaledW = (int) (imgH * scale);
+                int scaledH = (int) (imgW * scale);
+                int padX = (modelSize - scaledW) / 2;
+                int padY = (modelSize - scaledH) / 2;
 
                 ensureLetterboxBitmap(modelSize);
                 Canvas letterCanvas = new Canvas(reusedLetterboxBitmap);
                 letterCanvas.drawColor(Color.GRAY);
-                Matrix letterMatrix = new Matrix();
-                letterMatrix.postScale(letterScale, letterScale);
-                letterMatrix.postTranslate(padX, padY);
-                letterCanvas.drawBitmap(reusedRotatedBitmap, letterMatrix, null);
-                t3 = System.currentTimeMillis();
-                long timeLetterboxMs = t3 - t2;
+
+                // Combined matrix: rotate 90° around camera center, then scale, then translate
+                Matrix combinedMatrix = new Matrix();
+                // Step 1: move to center for rotation
+                combinedMatrix.postTranslate(-imgW / 2f, -imgH / 2f);
+                // Step 2: rotate 90°
+                combinedMatrix.postRotate(90);
+                // Step 3: scale
+                combinedMatrix.postScale(scale, scale);
+                // Step 4: move to the center of the padded area
+                combinedMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
+
+                letterCanvas.drawBitmap(cameraBitmap, combinedMatrix, null);
+                t2 = System.currentTimeMillis();
+                long timeRotateLetterboxMs = t2 - t1;
+                // For display compatibility, report rotate=0, letterbox=combined
+                long timeRotateMs = 0;
+                long timeLetterboxMs = timeRotateLetterboxMs;
 
                 // === Stage 4: Detect (preprocess + inference + decode + NMS + label) ===
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
 
-                // detectZeroCopy returns timing breakdown via detector
-                long[] detectTimings = new long[6]; // preprocess, inference, decode, nms, label, total
+                long[] detectTimings = new long[6];
                 ArrayList<Recognition> recognitions = detector.detectZeroCopyWithTimings(reusedLetterboxBitmap, detectTimings);
                 long timePreprocessMs = detectTimings[0];
                 long timeInferenceMs = detectTimings[1];
                 long timeDecodeMs = detectTimings[2];
                 long timeNmsMs = detectTimings[3];
                 long timeLabelMs = detectTimings[4];
-                t4 = System.currentTimeMillis();
+                t3 = System.currentTimeMillis();
 
                 // === Stage 5: Map coordinates ===
-                Matrix modelToRotated = new Matrix();
-                modelToRotated.postTranslate(-padX, -padY);
-                modelToRotated.postScale(1f / letterScale, 1f / letterScale);
+                // Inverse of the combined matrix to map model coords back to camera coords
+                Matrix modelToCamera = new Matrix();
+                // Model (0,0) is top-left of letterbox, but image is centered with padding
+                // First remove padding
+                modelToCamera.postTranslate(-padX, -padY);
+                // Then undo scale
+                modelToCamera.postScale(1f / scale, 1f / scale);
+                // Then undo rotation (-90°)
+                modelToCamera.postRotate(-90);
+                // Then undo center translation
+                modelToCamera.postTranslate(imgW / 2f, imgH / 2f);
+
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
-                    modelToRotated.mapRect(loc);
+                    modelToCamera.mapRect(loc);
                     r.setLocation(loc);
                 }
 
+                // Preview mapping (camera coords -> preview coords)
                 double previewScale = Math.min(
-                        previewHeight / (double) rotH,
-                        previewWidth / (double) rotW);
-                int renderW = (int) (previewScale * rotW);
-                int renderH = (int) (previewScale * rotH);
+                        previewHeight / (double) imgH,
+                        previewWidth / (double) imgW);
+                int renderW = (int) (previewScale * imgW);
+                int renderH = (int) (previewScale * imgH);
                 int offsetX = (previewWidth - renderW) / 2;
                 int offsetY = (previewHeight - renderH) / 2;
 
                 Matrix frameToPreview = new Matrix();
                 frameToPreview.postScale((float) previewScale, (float) previewScale);
-                t5 = System.currentTimeMillis();
-                long timeMapMs = t5 - t4;
+                t4 = System.currentTimeMillis();
+                long timeMapMs = t4 - t3;
 
-                // === Stage 6: Overlay (handled by DetectionOverlayView, minimal) ===
-                long timeOverlayMs = 0; // OverlayView just stores data, draw is on next frame
+                // === Stage 6: Overlay ===
+                long timeOverlayMs = 0;
 
                 // Debug info
                 String debugInfo = String.format(
-                        "cam=%dx%d rot=%dx%d preview=%dx%d letter=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
-                        imgW, imgH, rotW, rotH, previewWidth, previewHeight,
-                        letterScale, padX, padY, renderW, renderH, offsetX, offsetY);
+                        "cam=%dx%d preview=%dx%d scale=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
+                        imgW, imgH, previewWidth, previewHeight,
+                        scale, padX, padY, renderW, renderH, offsetX, offsetY);
                 Log.d("FullImageAnalyse", debugInfo);
 
-                // Log per-stage timings
                 Log.i("PipelineTiming", String.format(
-                        "toBitmap=%dms rotate=%dms letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
-                        timeToBitmapMs, timeRotateMs, timeLetterboxMs,
+                        "toBitmap=%dms rotate+letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
+                        timeToBitmapMs, timeRotateLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
                         timeNmsMs, timeLabelMs, timeMapMs,
                         System.currentTimeMillis() - start));
