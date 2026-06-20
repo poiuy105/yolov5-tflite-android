@@ -124,7 +124,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 // We do: camera -> letterboxBitmap (1 draw with combined matrix)
                 int modelSize = detector.getInputSize().getWidth();
 
-                // Camera frame is landscape (e.g. 320x240), screen is portrait
+                // Camera frame is landscape (e.g. 640x480), screen is portrait
                 // We need to: rotate 90° + scale to fit 320x320 + add gray padding
                 // Combined transform: rotate around center -> scale -> translate to fit
                 float scale = Math.min(
@@ -182,28 +182,27 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Camera (640x480 landscape) -> Preview (portrait)
                 // CameraX preview rotates the image 90° to display upright.
-                // So camera(x,y) maps to preview(y*scale, x*scale) after rotation.
+                // Build camera -> preview transform using the SAME structure as combinedMatrix,
+                // but with previewScale instead of letterbox scale, and preview centering.
                 float previewScale = Math.min(
                         previewWidth / (float) imgH,   // preview width / camera height (after rotation)
                         previewHeight / (float) imgW); // preview height / camera width (after rotation)
-                int renderW = (int) (previewScale * imgH);  // after 90° rotation, camera height becomes width
-                int renderH = (int) (previewScale * imgW);  // after 90° rotation, camera width becomes height
+                int renderW = (int) (imgH * previewScale);  // after 90° rotation, camera height becomes width
+                int renderH = (int) (imgW * previewScale);  // after 90° rotation, camera width becomes height
                 int offsetX = (previewWidth - renderW) / 2;
                 int offsetY = (previewHeight - renderH) / 2;
 
                 // Build camera -> preview transform:
-                // 1. Rotate 90° (landscape -> portrait)
-                // 2. Scale to preview
-                // 3. Translate to center
+                // Same structure as combinedMatrix but with previewScale and preview offset
                 Matrix cameraToPreview = new Matrix();
-                // Rotate around camera center
+                // Step 1: move to camera center
                 cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
+                // Step 2: rotate 90° (same direction as combinedMatrix)
                 cameraToPreview.postRotate(90);
-                cameraToPreview.postTranslate(imgH / 2f, imgW / 2f);
-                // Scale to preview
+                // Step 3: scale to preview
                 cameraToPreview.postScale(previewScale, previewScale);
-                // Center in preview
-                cameraToPreview.postTranslate(offsetX, offsetY);
+                // Step 4: move to preview center (with offset)
+                cameraToPreview.postTranslate(offsetX + renderW / 2f, offsetY + renderH / 2f);
 
                 // Apply: letterbox -> camera -> preview
                 for (Recognition r : recognitions) {
@@ -220,8 +219,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Debug info with full pipeline dimensions
                 String debugInfo = String.format(
-                        "cam=%dx%d rot=%dx%d model=%d scale=%.3f pad=%d,%d preview=%dx%d render=%dx%d offset=%d,%d",
-                        imgW, imgH, rotW, rotH, modelSize,
+                        "cam=%dx%d model=%d scale=%.3f pad=%d,%d preview=%dx%d render=%dx%d offset=%d,%d",
+                        imgW, imgH, modelSize,
                         scale, padX, padY, previewWidth, previewHeight,
                         renderW, renderH, offsetX, offsetY);
                 Log.d("FullImageAnalyse", debugInfo);
@@ -248,7 +247,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 emitter.onNext(new AnalyseResult(
                         totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
-                        recognitions, frameToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
+                        recognitions, cameraToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
                         modelSize,
                         timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
