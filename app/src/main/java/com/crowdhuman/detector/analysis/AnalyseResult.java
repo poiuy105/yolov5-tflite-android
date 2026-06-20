@@ -28,33 +28,51 @@ public class AnalyseResult {
     public final int renderWidth;
     public final int renderHeight;
 
+    // Per-stage timing breakdown (ms)
+    public final long timeToBitmapMs;
+    public final long timeRotateMs;
+    public final long timeLetterboxMs;
+    public final long timePreprocessMs;
+    public final long timeInferenceMs;
+    public final long timeDecodeMs;
+    public final long timeNmsMs;
+    public final long timeLabelMs;
+    public final long timeMapMs;
+    public final long timeOverlayMs;
+
     // Debug info
     public final String debugInfo;
     public final RectF firstBox;
 
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
-        this(costTimeMs, 0, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", null);
+        this(costTimeMs, 0, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", null,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight) {
-        this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", null);
+        this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", null,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight,
                          String debugInfo, RectF firstBox) {
         this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps,
-                imageWidth, imageHeight, debugInfo, firstBox, null, null, false, 0, 0, 0, 0);
+                imageWidth, imageHeight, debugInfo, firstBox, null, null, false, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
-    // Full constructor with overlay data
+    // Full constructor with overlay data and timing breakdown
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight,
                          String debugInfo, RectF firstBox,
                          ArrayList<Recognition> recognitions, Matrix frameToPreviewTransform,
-                         boolean isFrontCamera, int offsetX, int offsetY, int renderWidth, int renderHeight) {
+                         boolean isFrontCamera, int offsetX, int offsetY, int renderWidth, int renderHeight,
+                         long timeToBitmapMs, long timeRotateMs, long timeLetterboxMs,
+                         long timePreprocessMs, long timeInferenceMs, long timeDecodeMs,
+                         long timeNmsMs, long timeLabelMs, long timeMapMs, long timeOverlayMs) {
         this.costTimeMs = costTimeMs;
         this.inferenceTimeMs = inferenceTimeMs;
         this.resultBitmap = resultBitmap;
@@ -73,5 +91,15 @@ public class AnalyseResult {
         this.offsetY = offsetY;
         this.renderWidth = renderWidth;
         this.renderHeight = renderHeight;
+        this.timeToBitmapMs = timeToBitmapMs;
+        this.timeRotateMs = timeRotateMs;
+        this.timeLetterboxMs = timeLetterboxMs;
+        this.timePreprocessMs = timePreprocessMs;
+        this.timeInferenceMs = timeInferenceMs;
+        this.timeDecodeMs = timeDecodeMs;
+        this.timeNmsMs = timeNmsMs;
+        this.timeLabelMs = timeLabelMs;
+        this.timeMapMs = timeMapMs;
+        this.timeOverlayMs = timeOverlayMs;
     }
 }

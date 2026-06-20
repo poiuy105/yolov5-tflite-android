@@ -58,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView frameSizeTextView;
     private TextView detectCountTextView;
     private TextView fpsTextView;
+    private TextView timingTextView;
     private TextView thresholdTextView;
     private SeekBar thresholdSeekBar;
     private ImageView cameraSwitchButton;
@@ -131,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
         frameSizeTextView = findViewById(R.id.frame_size);
         detectCountTextView = findViewById(R.id.detect_count);
         fpsTextView = findViewById(R.id.fps_text);
+        timingTextView = findViewById(R.id.timing_text);
         thresholdTextView = findViewById(R.id.threshold_value);
         thresholdSeekBar = findViewById(R.id.threshold_seekbar);
         cameraSwitchButton = findViewById(R.id.camera_switch);
@@ -257,6 +259,16 @@ public class MainActivity extends AppCompatActivity {
                 inferenceTimeTextView.setText(result.costTimeMs + "ms (infer " + result.inferenceTimeMs + "ms)");
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
+
+                // Per-stage timing breakdown
+                String timingStr = String.format(
+                        "toBitmap:%dms\nrotate:%dms\nletterbox:%dms\npreprocess:%dms\ninference:%dms\ndecode:%dms\nnms:%dms\nlabel:%dms\nmap:%dms\ntotal:%dms",
+                        result.timeToBitmapMs, result.timeRotateMs, result.timeLetterboxMs,
+                        result.timePreprocessMs, result.timeInferenceMs, result.timeDecodeMs,
+                        result.timeNmsMs, result.timeLabelMs, result.timeMapMs,
+                        result.costTimeMs);
+                timingTextView.setText(timingStr);
+
                 Log.d("MainActivity", "Debug: " + result.debugInfo);
                 if (result.firstBox != null) {
                     Log.d("MainActivity", "First box: " + result.firstBox.toShortString());

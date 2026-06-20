@@ -102,26 +102,31 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         currentDisposable = Observable.create((ObservableEmitter<AnalyseResult> emitter) -> {
             long start = System.currentTimeMillis();
 
+            // Per-stage timing variables
+            long t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+
             try {
-                // RGBA_8888 direct output from CameraX - no YUV conversion needed
+                // === Stage 1: CameraX toBitmap ===
+                t0 = System.currentTimeMillis();
                 Bitmap cameraBitmap = image.toBitmap();
                 int imgW = cameraBitmap.getWidth();
                 int imgH = cameraBitmap.getHeight();
+                t1 = System.currentTimeMillis();
+                long timeToBitmapMs = t1 - t0;
 
-                // Rotate camera frame to match screen orientation (portrait)
-                // Camera sensor is landscape (640x480), screen is portrait (480x640)
-                // Use getTransformationMatrix for correct center-based rotation
+                // === Stage 2: Rotate ===
                 Matrix rotateMatrix = imageProcess.getTransformationMatrix(
                         imgW, imgH, imgH, imgW, 90, false);
-                // Rotate using pre-allocated bitmap via Canvas drawBitmap
                 ensureRotatedBitmap(imgH, imgW);
                 Canvas rotCanvas = new Canvas(reusedRotatedBitmap);
                 rotCanvas.drawBitmap(cameraBitmap, rotateMatrix, null);
                 int rotW = reusedRotatedBitmap.getWidth();
                 int rotH = reusedRotatedBitmap.getHeight();
+                t2 = System.currentTimeMillis();
+                long timeRotateMs = t2 - t1;
 
-                // Step 1: Direct letterbox from rotated camera frame to 320x320
-                int modelSize = detector.getInputSize().getWidth(); // 320
+                // === Stage 3: Letterbox ===
+                int modelSize = detector.getInputSize().getWidth();
                 float letterScale = Math.min(
                         modelSize / (float) rotW,
                         modelSize / (float) rotH);
@@ -133,34 +138,38 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 ensureLetterboxBitmap(modelSize);
                 Canvas letterCanvas = new Canvas(reusedLetterboxBitmap);
                 letterCanvas.drawColor(Color.GRAY);
-
                 Matrix letterMatrix = new Matrix();
                 letterMatrix.postScale(letterScale, letterScale);
                 letterMatrix.postTranslate(padX, padY);
                 letterCanvas.drawBitmap(reusedRotatedBitmap, letterMatrix, null);
+                t3 = System.currentTimeMillis();
+                long timeLetterboxMs = t3 - t2;
 
-                // Step 2: Detect
+                // === Stage 4: Detect (preprocess + inference + decode + NMS + label) ===
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
-                long inferenceStart = System.currentTimeMillis();
-                ArrayList<Recognition> recognitions = detector.detectZeroCopy(reusedLetterboxBitmap);
-                long inferenceTimeMs = System.currentTimeMillis() - inferenceStart;
 
-                // Step 3: Map detection boxes back to rotated frame coordinates
-                // model (320x320) -> rotated frame (rotW x rotH = 480x640)
+                // detectZeroCopy returns timing breakdown via detector
+                long[] detectTimings = new long[6]; // preprocess, inference, decode, nms, label, total
+                ArrayList<Recognition> recognitions = detector.detectZeroCopyWithTimings(reusedLetterboxBitmap, detectTimings);
+                long timePreprocessMs = detectTimings[0];
+                long timeInferenceMs = detectTimings[1];
+                long timeDecodeMs = detectTimings[2];
+                long timeNmsMs = detectTimings[3];
+                long timeLabelMs = detectTimings[4];
+                t4 = System.currentTimeMillis();
+
+                // === Stage 5: Map coordinates ===
                 Matrix modelToRotated = new Matrix();
                 modelToRotated.postTranslate(-padX, -padY);
                 modelToRotated.postScale(1f / letterScale, 1f / letterScale);
-
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
                     modelToRotated.mapRect(loc);
                     r.setLocation(loc);
                 }
 
-                // Step 4: Map rotated frame coordinates to preview coordinates for rendering
-                // This must match how PreviewView displays the camera feed
                 double previewScale = Math.min(
                         previewHeight / (double) rotH,
                         previewWidth / (double) rotW);
@@ -171,9 +180,11 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 Matrix frameToPreview = new Matrix();
                 frameToPreview.postScale((float) previewScale, (float) previewScale);
-                // No translate here - renderer handles offset via offsetX/offsetY
+                t5 = System.currentTimeMillis();
+                long timeMapMs = t5 - t4;
 
-                // Step 5: Rendering handled by DetectionOverlayView (no Bitmap needed)
+                // === Stage 6: Overlay (handled by DetectionOverlayView, minimal) ===
+                long timeOverlayMs = 0; // OverlayView just stores data, draw is on next frame
 
                 // Debug info
                 String debugInfo = String.format(
@@ -181,6 +192,14 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         imgW, imgH, rotW, rotH, previewWidth, previewHeight,
                         letterScale, padX, padY, renderW, renderH, offsetX, offsetY);
                 Log.d("FullImageAnalyse", debugInfo);
+
+                // Log per-stage timings
+                Log.i("PipelineTiming", String.format(
+                        "toBitmap=%dms rotate=%dms letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
+                        timeToBitmapMs, timeRotateMs, timeLetterboxMs,
+                        timePreprocessMs, timeInferenceMs, timeDecodeMs,
+                        timeNmsMs, timeLabelMs, timeMapMs,
+                        System.currentTimeMillis() - start));
 
                 RectF firstBox = recognitions.isEmpty() ? null : new RectF(recognitions.get(0).getLocation());
 
@@ -192,9 +211,15 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 lastFrameTime = now;
 
-                emitter.onNext(new AnalyseResult(now - start, inferenceTimeMs, null, recognitions.size(),
+                long totalTimeMs = now - start;
+
+                emitter.onNext(new AnalyseResult(
+                        totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
-                        recognitions, frameToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH));
+                        recognitions, frameToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
+                        timeToBitmapMs, timeRotateMs, timeLetterboxMs,
+                        timePreprocessMs, timeInferenceMs, timeDecodeMs,
+                        timeNmsMs, timeLabelMs, timeMapMs, timeOverlayMs));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);

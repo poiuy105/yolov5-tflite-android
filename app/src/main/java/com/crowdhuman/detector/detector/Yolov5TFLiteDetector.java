@@ -334,6 +334,117 @@ public class Yolov5TFLiteDetector {
     }
 
     /**
+     * Zero-copy detect with per-stage timing breakdown.
+     * timings[0]=preprocess, [1]=inference, [2]=decode, [3]=nms, [4]=label, [5]=total
+     */
+    public ArrayList<Recognition> detectZeroCopyWithTimings(Bitmap bitmap, long[] timings) {
+        if (tflite == null || currentConfig == null || inputBuffer == null) {
+            Log.e("tfliteSupport", "Interpreter or buffer not ready!");
+            return new ArrayList<>();
+        }
+        if (currentConfig.isInt8) {
+            return detectWithTimings(bitmap, timings);
+        }
+
+        long t0 = System.currentTimeMillis();
+
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        if (pixelCache == null || pixelCache.length != w * h) {
+            pixelCache = new int[w * h];
+        }
+        bitmap.getPixels(pixelCache, 0, w, 0, 0, w, h);
+
+        inputBuffer.rewind();
+        for (int i = 0; i < pixelCache.length; i++) {
+            int p = pixelCache[i];
+            inputBuffer.putFloat(((p >> 16) & 0xFF) / 255.0f);
+            inputBuffer.putFloat(((p >> 8) & 0xFF) / 255.0f);
+            inputBuffer.putFloat((p & 0xFF) / 255.0f);
+        }
+        inputBuffer.rewind();
+
+        long t1 = System.currentTimeMillis();
+        timings[0] = t1 - t0; // preprocess
+
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+        tflite.run(inputBuffer, outputBuffer.getBuffer());
+
+        long t2 = System.currentTimeMillis();
+        timings[1] = t2 - t1; // inference
+
+        ArrayList<Recognition> allRecognitions = decodeOutput(outputBuffer.getFloatArray());
+
+        long t3 = System.currentTimeMillis();
+        timings[2] = t3 - t2; // decode
+
+        ArrayList<Recognition> filtered = nmsProcessor.suppress(
+                allRecognitions, currentConfig.numClasses, IOU_CLASS_DUPLICATED_THRESHOLD, enabledLabels);
+
+        long t4 = System.currentTimeMillis();
+        timings[3] = t4 - t3; // nms
+
+        assignLabels(filtered);
+
+        long t5 = System.currentTimeMillis();
+        timings[4] = t5 - t4; // label
+        timings[5] = t5 - t0; // total
+
+        return filtered;
+    }
+
+    /**
+     * Standard detect with per-stage timing breakdown.
+     * timings[0]=preprocess, [1]=inference, [2]=decode, [3]=nms, [4]=label, [5]=total
+     */
+    public ArrayList<Recognition> detectWithTimings(Bitmap bitmap, long[] timings) {
+        if (tflite == null || currentConfig == null) {
+            Log.e("tfliteSupport", "Interpreter is null, model not loaded!");
+            return new ArrayList<>();
+        }
+
+        long t0 = System.currentTimeMillis();
+        TensorImage input = preprocessImage(bitmap);
+        long t1 = System.currentTimeMillis();
+        timings[0] = t1 - t0;
+
+        TensorBuffer outputBuffer;
+        if (currentConfig.isInt8) {
+            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.UINT8);
+        } else {
+            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+        }
+        tflite.run(input.getBuffer(), outputBuffer.getBuffer());
+        long t2 = System.currentTimeMillis();
+        timings[1] = t2 - t1;
+
+        if (currentConfig.isInt8) {
+            if (int8TensorProcessor == null) {
+                int8TensorProcessor = new TensorProcessor.Builder()
+                        .add(new DequantizeOp(OUTPUT_INT8_QUANT.getZeroPoint(), OUTPUT_INT8_QUANT.getScale()))
+                        .build();
+            }
+            outputBuffer = int8TensorProcessor.process(outputBuffer);
+        }
+
+        ArrayList<Recognition> allRecognitions = decodeOutput(outputBuffer.getFloatArray());
+        long t3 = System.currentTimeMillis();
+        timings[2] = t3 - t2;
+
+        ArrayList<Recognition> filtered = nmsProcessor.suppress(
+                allRecognitions, currentConfig.numClasses, IOU_CLASS_DUPLICATED_THRESHOLD, enabledLabels);
+        long t4 = System.currentTimeMillis();
+        timings[3] = t4 - t3;
+
+        assignLabels(filtered);
+        long t5 = System.currentTimeMillis();
+        timings[4] = t5 - t4;
+        timings[5] = t5 - t0;
+
+        return filtered;
+    }
+
+    /**
      * Pre-allocate input buffer after model is loaded.
      * Must be called after initialModel() succeeds.
      */
