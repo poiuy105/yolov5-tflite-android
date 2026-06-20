@@ -213,17 +213,54 @@ public class Yolov5TFLiteDetector {
      * Skips anchors below threshold before computing class scores,
      * reducing iterations from 6300 to typically 50-200 on most frames.
      */
+    private boolean isAnchorBased = true; // true = YOLOv5, false = YOLOv8
+
     private ArrayList<Recognition> decodeOutput(float[] data) {
         ArrayList<Recognition> results = new ArrayList<>();
+        if (data == null || data.length == 0) return results;
+
         float threshold = nmsProcessor.getDetectThreshold();
         int stride = outputSize[2];
+        int numClasses = stride - 4; // YOLOv5: stride-5, YOLOv8: stride-4
+
+        // Auto-detect format: YOLOv5 has objness at index 4, YOLOv8 does not
+        // YOLOv5: [cx, cy, w, h, objness, cls1, cls2, ...] -> stride = numClasses + 5
+        // YOLOv8: [cx, cy, w, h, cls1, cls2, ...] -> stride = numClasses + 4
+        if (currentConfig != null) {
+            int expectedV5 = currentConfig.numClasses + 5;
+            int expectedV8 = currentConfig.numClasses + 4;
+            isAnchorBased = (stride == expectedV5);
+            if (!isAnchorBased && stride != expectedV8) {
+                Log.w("tfliteSupport", "Unexpected stride " + stride + " for " + currentConfig.numClasses + " classes");
+            }
+        }
 
         for (int i = 0; i < outputSize[1]; i++) {
             int base = i * stride;
-            float confidence = data[4 + base];
 
-            // Early exit: skip low-confidence anchors entirely
-            if (confidence < threshold) continue;
+            // Find max class score
+            int labelId = 0;
+            float maxScore = 0.f;
+            int classStart = isAnchorBased ? 5 : 4;
+            for (int j = classStart; j < stride; j++) {
+                float score = data[j + base];
+                if (score > maxScore) {
+                    maxScore = score;
+                    labelId = j - classStart;
+                }
+            }
+
+            // Confidence check
+            float confidence;
+            if (isAnchorBased) {
+                confidence = data[4 + base]; // objness
+                if (confidence < threshold) continue;
+                if (maxScore * confidence < threshold) continue;
+            } else {
+                // YOLOv8: no objness, class score IS the confidence
+                confidence = maxScore;
+                if (confidence < threshold) continue;
+            }
 
             // Decode coordinates
             float x = data[base] * inputSize.getWidth();
@@ -234,20 +271,6 @@ public class Yolov5TFLiteDetector {
             int ymin = (int) Math.max(0, y - h / 2.);
             int xmax = (int) Math.min(inputSize.getWidth(), x + w / 2.);
             int ymax = (int) Math.min(inputSize.getHeight(), y + h / 2.);
-
-            // Find max class score
-            int labelId = 0;
-            float maxScore = 0.f;
-            for (int j = 5; j < stride; j++) {
-                float score = data[j + base];
-                if (score > maxScore) {
-                    maxScore = score;
-                    labelId = j - 5;
-                }
-            }
-
-            // Combined score filter (objness * class_score)
-            if (maxScore * confidence < threshold) continue;
 
             results.add(new Recognition(labelId, "", maxScore, confidence,
                     new RectF(xmin, ymin, xmax, ymax)));
