@@ -46,14 +46,16 @@ public class AnalyseResult {
 
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
-        this(costTimeMs, 0, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", null,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        this(costTimeMs, 0L, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", (RectF) null,
+                null, null, false, 0, 0, 0, 0,
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight) {
-        this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", null,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", (RectF) null,
+                null, null, false, 0, 0, 0, 0,
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
