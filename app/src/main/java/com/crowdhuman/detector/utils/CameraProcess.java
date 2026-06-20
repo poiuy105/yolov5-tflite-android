@@ -59,8 +59,8 @@ public class CameraProcess {
      * reduces conversion time by ~10x with negligible impact on detection accuracy
      * since the model input is only 320x320.
      */
-    private static final int MAX_ANALYSIS_WIDTH = 1280;
-    private static final int MAX_ANALYSIS_HEIGHT = 960;
+    private static final int MAX_ANALYSIS_WIDTH = 640;
+    private static final int MAX_ANALYSIS_HEIGHT = 480;
 
     private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
         CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
