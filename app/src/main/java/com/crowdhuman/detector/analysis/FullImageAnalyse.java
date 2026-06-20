@@ -108,14 +108,21 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
-                // Step 1: Direct letterbox from original camera frame to 320x320
-                // No intermediate rotation/scaling to preview size!
+                // Rotate camera frame to match screen orientation (portrait)
+                // Camera sensor is landscape (640x480), screen is portrait (480x640)
+                Matrix rotateMatrix = new Matrix();
+                rotateMatrix.postRotate(90);
+                Bitmap rotatedBitmap = Bitmap.createBitmap(pooledImageBitmap, 0, 0, imgW, imgH, rotateMatrix, false);
+                int rotW = rotatedBitmap.getWidth();  // 480
+                int rotH = rotatedBitmap.getHeight(); // 640
+
+                // Step 1: Direct letterbox from rotated camera frame to 320x320
                 int modelSize = detector.getInputSize().getWidth(); // 320
                 float letterScale = Math.min(
-                        modelSize / (float) imgW,
-                        modelSize / (float) imgH);
-                int letterW = (int) (imgW * letterScale);
-                int letterH = (int) (imgH * letterScale);
+                        modelSize / (float) rotW,
+                        modelSize / (float) rotH);
+                int letterW = (int) (rotW * letterScale);
+                int letterH = (int) (rotH * letterScale);
                 int padX = (modelSize - letterW) / 2;
                 int padY = (modelSize - letterH) / 2;
 
@@ -126,7 +133,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Matrix letterMatrix = new Matrix();
                 letterMatrix.postScale(letterScale, letterScale);
                 letterMatrix.postTranslate(padX, padY);
-                letterCanvas.drawBitmap(pooledImageBitmap, letterMatrix, null);
+                letterCanvas.drawBitmap(rotatedBitmap, letterMatrix, null);
 
                 // Step 2: Detect
                 if (enabledLabels != null) {
@@ -136,25 +143,25 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
                 long inferenceTimeMs = System.currentTimeMillis() - inferenceStart;
 
-                // Step 3: Map detection boxes back to original camera frame coordinates
-                // model (320x320) -> original frame (imgW x imgH)
-                Matrix modelToFrame = new Matrix();
-                modelToFrame.postTranslate(-padX, -padY);
-                modelToFrame.postScale(1f / letterScale, 1f / letterScale);
+                // Step 3: Map detection boxes back to rotated frame coordinates
+                // model (320x320) -> rotated frame (rotW x rotH = 480x640)
+                Matrix modelToRotated = new Matrix();
+                modelToRotated.postTranslate(-padX, -padY);
+                modelToRotated.postScale(1f / letterScale, 1f / letterScale);
 
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
-                    modelToFrame.mapRect(loc);
+                    modelToRotated.mapRect(loc);
                     r.setLocation(loc);
                 }
 
-                // Step 4: Map original frame coordinates to preview coordinates for rendering
+                // Step 4: Map rotated frame coordinates to preview coordinates for rendering
                 // This must match how PreviewView displays the camera feed
                 double previewScale = Math.min(
-                        previewHeight / (double) imgH,
-                        previewWidth / (double) imgW);
-                int renderW = (int) (previewScale * imgW);
-                int renderH = (int) (previewScale * imgH);
+                        previewHeight / (double) rotH,
+                        previewWidth / (double) rotW);
+                int renderW = (int) (previewScale * rotW);
+                int renderH = (int) (previewScale * rotH);
                 int offsetX = (previewWidth - renderW) / 2;
                 int offsetY = (previewHeight - renderH) / 2;
 
@@ -168,8 +175,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Debug info
                 String debugInfo = String.format(
-                        "cam=%dx%d preview=%dx%d letter=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
-                        imgW, imgH, previewWidth, previewHeight,
+                        "cam=%dx%d rot=%dx%d preview=%dx%d letter=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
+                        imgW, imgH, rotW, rotH, previewWidth, previewHeight,
                         letterScale, padX, padY, renderW, renderH, offsetX, offsetY);
                 Log.d("FullImageAnalyse", debugInfo);
 
