@@ -139,10 +139,6 @@ public class DetectionOverlayView extends View {
             canvas.drawText(text, textX, textY, textPaint);
         }
 
-        // Draw FPS
-        if (fps > 0) {
-            canvas.drawText(String.format(Locale.US, "FPS: %.1f", fps),
-                    10 * textScale, 24 * textScale, fpsPaint);
-        }
+        // FPS display removed from overlay (shown in bottom control panel only)
     }
 }
