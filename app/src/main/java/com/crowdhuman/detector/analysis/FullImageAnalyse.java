@@ -131,22 +131,32 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Canvas canvas = new Canvas(pooledFullImageBitmap);
                 canvas.drawBitmap(pooledImageBitmap, transform, null);
 
-                // Crop the actual image region (not black bars)
-                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, scaledW, scaledH);
+                // Letterbox: scale to fit within 320x320 while preserving aspect ratio,
+                // then pad with gray borders (no cropping). This matches YOLOv5 training.
+                int modelSize = detector.getInputSize().getWidth(); // 320
+                float scaleFactor = Math.min(
+                        modelSize / (float) scaledW,
+                        modelSize / (float) scaledH);
+                int letterW = (int) (scaledW * scaleFactor);
+                int letterH = (int) (scaledH * scaleFactor);
+                int padX = (modelSize - letterW) / 2;
+                int padY = (modelSize - letterH) / 2;
 
-                Matrix previewToModel = imageProcess.getTransformationMatrix(
-                        cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
-                        detector.getInputSize().getWidth(), detector.getInputSize().getHeight(), 0, true);
-                modelInputBitmap = Bitmap.createBitmap(cropImageBitmap, 0, 0,
-                        cropImageBitmap.getWidth(), cropImageBitmap.getHeight(), previewToModel, false);
+                // Create letterboxed bitmap
+                modelInputBitmap = Bitmap.createBitmap(modelSize, modelSize, Bitmap.Config.ARGB_8888);
+                Canvas letterCanvas = new Canvas(modelInputBitmap);
+                letterCanvas.drawColor(Color.GRAY); // YOLOv5 letterbox padding color
 
-                // For rendering: scale model output back to preview size
+                Matrix letterMatrix = new Matrix();
+                letterMatrix.postScale(scaleFactor, scaleFactor);
+                letterMatrix.postTranslate(padX, padY);
+                letterCanvas.drawBitmap(pooledFullImageBitmap, letterMatrix, null);
+
+                // For rendering: map model output back to preview coordinates
+                // Inverse of letterbox transform
                 Matrix modelToPreview = new Matrix();
-                try { previewToModel.invert(modelToPreview); }
-                catch (IllegalArgumentException e) {
-                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
-                    return;
-                }
+                modelToPreview.postTranslate(-padX, -padY);
+                modelToPreview.postScale(1f / scaleFactor, 1f / scaleFactor);
 
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
