@@ -27,18 +27,11 @@ jobs:
           model.export(format='tflite', imgsz=160, half=True)
           "
 
-      - name: Move exported model
+      - name: Move and verify exported model
         run: |
-          find . -name '*saved_model*' -o -name '*tflite*' | head -20
-          find . -name 'yolov5n*full_integer_quant*' -o -name 'yolov5n*fp16*' | head -10
-          EXPORTED=$(find runs -name '*fp16*160*' -o -name '*160*fp16*' 2>/dev/null | head -1)
-          if [ -z "$EXPORTED" ]; then
-            EXPORTED=$(find runs -name '*.tflite' | head -1)
-          fi
-          if [ -n "$EXPORTED" ]; then
-            cp "$EXPORTED" ./yolov5n-fp16-160.tflite
-          fi
+          cp yolov5nu_saved_model/yolov5nu_float16.tflite ./yolov5n-fp16-160.tflite
           ls -la yolov5n-fp16-160.tflite
+          file yolov5n-fp16-160.tflite
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
