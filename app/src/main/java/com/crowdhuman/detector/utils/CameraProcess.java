@@ -14,6 +14,9 @@ import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
+import androidx.camera.core.resolutionselector.AspectRatioStrategy;
+import androidx.camera.core.resolutionselector.ResolutionFilter;
+import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -21,7 +24,8 @@ import androidx.lifecycle.LifecycleOwner;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
-import java.util.concurrent.ExecutionException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class CameraProcess {
 
@@ -30,6 +34,10 @@ public class CameraProcess {
     private static final int REQUEST_CODE_PERMISSIONS = 1001;
     private static final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA"};
     private int currentLensFacing = CameraSelector.LENS_FACING_BACK;
+
+    // Target analysis resolution - must be small for low-end devices
+    private static final int TARGET_ANALYSIS_WIDTH = 320;
+    private static final int TARGET_ANALYSIS_HEIGHT = 240;
 
     public boolean allPermissionsGranted(Context context) {
         for (String permission : REQUIRED_PERMISSIONS) {
@@ -53,58 +61,43 @@ public class CameraProcess {
     }
 
     /**
-     * Query the largest YUV_420_888 analysis resolution capped at 640x480.
-     * Using the full sensor resolution causes severe CPU bottleneck in YUV→RGB conversion.
-     * 640x480 is a good balance: fast preprocessing, negligible accuracy impact
-     * since model input is only 320x320.
+     * Build a ResolutionSelector that forces the analysis resolution to be
+     * at most TARGET_ANALYSIS_WIDTH x TARGET_ANALYSIS_HEIGHT.
+     * Uses ResolutionFilter to hard-cap the available resolutions.
      */
-    private static final int MAX_ANALYSIS_WIDTH = 320;
-    private static final int MAX_ANALYSIS_HEIGHT = 240;
-
-    private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
-        CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-        try {
-            for (String cameraId : cm.getCameraIdList()) {
-                CameraCharacteristics chars = cm.getCameraCharacteristics(cameraId);
-                Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
-                if (facing != null && facing == lensFacing) {
-                    StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    if (map == null) continue;
-                    android.util.Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
-                    if (sizes == null || sizes.length == 0) continue;
-
-                    // Pick the largest resolution that does not exceed MAX_ANALYSIS dimensions
-                    android.util.Size best = null;
-                    for (android.util.Size s : sizes) {
-                        if (s.getWidth() <= MAX_ANALYSIS_WIDTH && s.getHeight() <= MAX_ANALYSIS_HEIGHT) {
-                            if (best == null || s.getWidth() * s.getHeight() > best.getWidth() * best.getHeight()) {
-                                best = s;
+    private ResolutionSelector buildAnalysisResolutionSelector() {
+        return new ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                .setResolutionFilter(new ResolutionFilter() {
+                    @Override
+                    public List<android.util.Size> filter(List<android.util.Size> supportedSizes, int rotationDegrees) {
+                        List<android.util.Size> filtered = new ArrayList<>();
+                        // Only keep resolutions <= 320x240
+                        for (android.util.Size size : supportedSizes) {
+                            if (size.getWidth() <= TARGET_ANALYSIS_WIDTH
+                                    && size.getHeight() <= TARGET_ANALYSIS_HEIGHT) {
+                                filtered.add(size);
                             }
                         }
-                    }
-                    if (best != null) {
-                        Log.i("CameraProcess", "Selected analysis resolution for facing=" + lensFacing
-                                + ": " + best.getWidth() + "x" + best.getHeight());
-                        return best;
-                    }
-                    // If no resolution fits within cap, pick the smallest available
-                    android.util.Size min = sizes[0];
-                    for (android.util.Size s : sizes) {
-                        if (s.getWidth() * s.getHeight() < min.getWidth() * min.getHeight()) {
-                            min = s;
+                        if (filtered.isEmpty()) {
+                            // If nothing fits, pick the smallest available
+                            android.util.Size min = supportedSizes.get(0);
+                            for (android.util.Size s : supportedSizes) {
+                                if (s.getWidth() * s.getHeight() < min.getWidth() * min.getHeight()) {
+                                    min = s;
+                                }
+                            }
+                            Log.w("CameraProcess", "No resolution <= " + TARGET_ANALYSIS_WIDTH + "x" + TARGET_ANALYSIS_HEIGHT
+                                    + ", using smallest: " + min.getWidth() + "x" + min.getHeight());
+                            filtered.add(min);
+                        } else {
+                            Log.i("CameraProcess", "ResolutionFilter: " + filtered.size() + " candidates <= "
+                                    + TARGET_ANALYSIS_WIDTH + "x" + TARGET_ANALYSIS_HEIGHT);
                         }
+                        return filtered;
                     }
-                    Log.w("CameraProcess", "No resolution within cap, using smallest: "
-                            + min.getWidth() + "x" + min.getHeight());
-                    return min;
-                }
-            }
-        } catch (CameraAccessException e) {
-            Log.e("CameraProcess", "Failed to query camera resolutions", e);
-        }
-        // Fallback
-        Log.w("CameraProcess", "Could not query resolution, using fallback 640x480");
-        return new android.util.Size(MAX_ANALYSIS_WIDTH, MAX_ANALYSIS_HEIGHT);
+                })
+                .build();
     }
 
     public void startCamera(Context context, ImageAnalysis.Analyzer analyzer, PreviewView previewView) {
@@ -122,16 +115,17 @@ public class CameraProcess {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                // Query max resolution via Camera2 characteristics
-                android.util.Size maxSize = getMaxAnalysisResolution(context, currentLensFacing);
-                Log.i("CameraProcess", "Requesting analysis resolution: " + maxSize.getWidth() + "x" + maxSize.getHeight());
+                // Use ResolutionSelector to force small analysis resolution
+                ResolutionSelector analysisSelector = buildAnalysisResolutionSelector();
 
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setTargetResolution(maxSize)
+                        .setResolutionSelector(analysisSelector)
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
+
+                Log.i("CameraProcess", "ImageAnalysis configured with ResolutionSelector, RGBA_8888, KEEP_ONLY_LATEST");
 
                 // Preview: 4:3 aspect ratio (portrait = 3:4)
                 Preview preview = new Preview.Builder()
@@ -148,7 +142,7 @@ public class CameraProcess {
                     throw new IllegalArgumentException("Context must be a LifecycleOwner");
                 }
 
-            } catch (ExecutionException | InterruptedException e) {
+            } catch (Exception e) {
                 Log.e("CameraProcess", "Failed to start camera: " + e.getMessage(), e);
                 if (errorCallback != null) errorCallback.onCameraError("Camera failed: " + e.getMessage());
             } finally {

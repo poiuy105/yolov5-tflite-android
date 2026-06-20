@@ -99,6 +99,23 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 Bitmap cameraBitmap = image.toBitmap();
                 int imgW = cameraBitmap.getWidth();
                 int imgH = cameraBitmap.getHeight();
+
+                // Safety: if CameraX returns an unreasonably large frame, downscale immediately.
+                // This prevents CPU bottleneck on rotate/letterbox operations.
+                final int MAX_CAMERA_DIM = 480;
+                if (imgW > MAX_CAMERA_DIM || imgH > MAX_CAMERA_DIM) {
+                    Log.w("FullImageAnalyse", "Camera frame too large: " + imgW + "x" + imgH
+                            + ", downscaling to fit " + MAX_CAMERA_DIM + "px");
+                    float downScale = Math.min((float) MAX_CAMERA_DIM / imgW, (float) MAX_CAMERA_DIM / imgH);
+                    int newW = Math.max(1, (int) (imgW * downScale));
+                    int newH = Math.max(1, (int) (imgH * downScale));
+                    Bitmap scaled = Bitmap.createScaledBitmap(cameraBitmap, newW, newH, true);
+                    cameraBitmap.recycle();
+                    cameraBitmap = scaled;
+                    imgW = newW;
+                    imgH = newH;
+                }
+
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
