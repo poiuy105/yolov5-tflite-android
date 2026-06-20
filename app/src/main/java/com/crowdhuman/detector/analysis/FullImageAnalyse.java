@@ -207,7 +207,21 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 // Apply: letterbox -> camera -> preview
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
+                    // 1. Map from model letterbox space back to camera (landscape) space
                     modelToCamera.mapRect(loc);
+
+                    // 2. Front camera: horizontal mirror IN CAMERA SPACE
+                    //    This must happen BEFORE cameraToPreview transform because
+                    //    the mirror axis is the camera's center line.
+                    if (isFrontCamera) {
+                        float centerX = imgW / 2f;
+                        float left = 2 * centerX - loc.right;
+                        float right = 2 * centerX - loc.left;
+                        loc.left = left;
+                        loc.right = right;
+                    }
+
+                    // 3. Map from camera space to preview (screen) space
                     cameraToPreview.mapRect(loc);
                     r.setLocation(loc);
                 }

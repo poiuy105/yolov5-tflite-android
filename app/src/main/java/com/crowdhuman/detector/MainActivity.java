@@ -247,7 +247,6 @@ public class MainActivity extends AppCompatActivity {
                 if (result.recognitions != null) {
                     boxLabelCanvas.updateResults(
                             result.recognitions,
-                            result.frameToPreviewTransform,
                             result.isFrontCamera,
                             result.fps,
                             result.offsetX,

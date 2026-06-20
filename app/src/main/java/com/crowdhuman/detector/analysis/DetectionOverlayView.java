@@ -28,7 +28,6 @@ public class DetectionOverlayView extends View {
     private final float textScale;
 
     private ArrayList<Recognition> recognitions = new ArrayList<>();
-    private Matrix frameToPreviewTransform = new Matrix();
     private boolean isFrontCamera = false;
     private float fps = 0;
     private int offsetX = 0, offsetY = 0;
@@ -78,12 +77,12 @@ public class DetectionOverlayView extends View {
     /**
      * Update detection results and trigger redraw.
      * Called from main thread.
+     * Coordinates are already in preview space (no further transform needed).
      */
-    public void updateResults(ArrayList<Recognition> recognitions, Matrix transform,
+    public void updateResults(ArrayList<Recognition> recognitions,
                               boolean isFrontCamera, float fps,
                               int offsetX, int offsetY, int imageWidth, int imageHeight) {
         this.recognitions = recognitions != null ? recognitions : new ArrayList<>();
-        this.frameToPreviewTransform = transform != null ? transform : new Matrix();
         this.isFrontCamera = isFrontCamera;
         this.fps = fps;
         this.offsetX = offsetX;
@@ -113,18 +112,8 @@ public class DetectionOverlayView extends View {
             String label = res.getLabelName();
             float confidence = res.getConfidence();
 
-            // Apply frame-to-preview transform
-            frameToPreviewTransform.mapRect(location);
-
-            // Front camera: horizontal mirror
-            if (isFrontCamera && imageWidth > 0) {
-                float left = imageWidth - location.right;
-                float right = imageWidth - location.left;
-                location.left = left;
-                location.right = right;
-            }
-
-            // Apply black bar offset
+            // Coordinates are already mapped to preview space by FullImageAnalyse.
+            // Just apply black bar offset for FIT_CENTER letterboxing.
             location.offset(offsetX, offsetY);
 
             // Clamp to view bounds
