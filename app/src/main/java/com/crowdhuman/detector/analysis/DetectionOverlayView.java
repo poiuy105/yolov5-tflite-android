@@ -112,15 +112,14 @@ public class DetectionOverlayView extends View {
             String label = res.getLabelName();
             float confidence = res.getConfidence();
 
-            // Coordinates are already mapped to preview space by FullImageAnalyse.
-            // Just apply black bar offset for FIT_CENTER letterboxing.
-            location.offset(offsetX, offsetY);
+            // Coordinates are already in preview space (including FIT_CENTER offset)
+            // mapped by FullImageAnalyse's cameraToPreview matrix. No extra offset needed.
 
             // Clamp to view bounds
-            location.left = Math.max(offsetX, location.left);
-            location.top = Math.max(offsetY, location.top);
-            location.right = Math.min(offsetX + imageWidth, location.right);
-            location.bottom = Math.min(offsetY + imageHeight, location.bottom);
+            location.left = Math.max(0, location.left);
+            location.top = Math.max(0, location.top);
+            location.right = Math.min((float) getWidth(), location.right);
+            location.bottom = Math.min((float) getHeight(), location.bottom);
 
             // Per-class color
             int color = CLASS_COLORS[Math.abs(res.getLabelId()) % CLASS_COLORS.length];
