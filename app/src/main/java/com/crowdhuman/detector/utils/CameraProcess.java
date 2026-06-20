@@ -53,11 +53,13 @@ public class CameraProcess {
     }
 
     /**
-     * Query the largest 1:1 (square) YUV_420_888 analysis resolution capped at 640x640.
-     * Using 1:1 aspect ratio eliminates rotation/scaling overhead in image processing
-     * and matches the model's 320x320 square input. This is more efficient than 3:4 or 4:3.
+     * Query the largest YUV_420_888 analysis resolution capped at 640x480.
+     * Using the full sensor resolution causes severe CPU bottleneck in YUV→RGB conversion.
+     * 640x480 is a good balance: fast preprocessing, negligible accuracy impact
+     * since model input is only 320x320.
      */
-    private static final int MAX_ANALYSIS_SIZE = 640;
+    private static final int MAX_ANALYSIS_WIDTH = 640;
+    private static final int MAX_ANALYSIS_HEIGHT = 480;
 
     private android.util.Size getMaxAnalysisResolution(@NonNull Context context, int lensFacing) {
         CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
@@ -71,36 +73,21 @@ public class CameraProcess {
                     android.util.Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
                     if (sizes == null || sizes.length == 0) continue;
 
-                    // Pick the largest 1:1 (square) resolution that does not exceed MAX_ANALYSIS_SIZE
+                    // Pick the largest resolution that does not exceed MAX_ANALYSIS dimensions
                     android.util.Size best = null;
                     for (android.util.Size s : sizes) {
-                        if (s.getWidth() == s.getHeight() && s.getWidth() <= MAX_ANALYSIS_SIZE) {
-                            if (best == null || s.getWidth() > best.getWidth()) {
+                        if (s.getWidth() <= MAX_ANALYSIS_WIDTH && s.getHeight() <= MAX_ANALYSIS_HEIGHT) {
+                            if (best == null || s.getWidth() * s.getHeight() > best.getWidth() * best.getHeight()) {
                                 best = s;
                             }
                         }
                     }
                     if (best != null) {
-                        Log.i("CameraProcess", "Selected 1:1 analysis resolution for facing=" + lensFacing
+                        Log.i("CameraProcess", "Selected analysis resolution for facing=" + lensFacing
                                 + ": " + best.getWidth() + "x" + best.getHeight());
                         return best;
                     }
-                    // Fallback: pick the largest square resolution <= MAX_ANALYSIS_SIZE by cropping from available
-                    // If no exact square found, use the largest resolution within cap and let CameraX handle it
-                    android.util.Size fallback = null;
-                    for (android.util.Size s : sizes) {
-                        if (s.getWidth() <= MAX_ANALYSIS_SIZE && s.getHeight() <= MAX_ANALYSIS_SIZE) {
-                            if (fallback == null || s.getWidth() * s.getHeight() > fallback.getWidth() * fallback.getHeight()) {
-                                fallback = s;
-                            }
-                        }
-                    }
-                    if (fallback != null) {
-                        Log.w("CameraProcess", "No exact 1:1 resolution found, using fallback: "
-                                + fallback.getWidth() + "x" + fallback.getHeight());
-                        return fallback;
-                    }
-                    // Last resort: smallest available
+                    // If no resolution fits within cap, pick the smallest available
                     android.util.Size min = sizes[0];
                     for (android.util.Size s : sizes) {
                         if (s.getWidth() * s.getHeight() < min.getWidth() * min.getHeight()) {
@@ -116,8 +103,8 @@ public class CameraProcess {
             Log.e("CameraProcess", "Failed to query camera resolutions", e);
         }
         // Fallback
-        Log.w("CameraProcess", "Could not query resolution, using fallback 640x640");
-        return new android.util.Size(MAX_ANALYSIS_SIZE, MAX_ANALYSIS_SIZE);
+        Log.w("CameraProcess", "Could not query resolution, using fallback 640x480");
+        return new android.util.Size(MAX_ANALYSIS_WIDTH, MAX_ANALYSIS_HEIGHT);
     }
 
     public void startCamera(Context context, ImageAnalysis.Analyzer analyzer, PreviewView previewView) {
@@ -145,9 +132,9 @@ public class CameraProcess {
                         .build();
                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer);
 
-                // Preview: 1:1 square aspect ratio to match analysis and model input
+                // Preview: 4:3 aspect ratio (portrait = 3:4)
                 Preview preview = new Preview.Builder()
-                        .setTargetResolution(new android.util.Size(MAX_ANALYSIS_SIZE, MAX_ANALYSIS_SIZE))
+                        .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                         .build();
                 CameraSelector selector = new CameraSelector.Builder()
                         .requireLensFacing(currentLensFacing).build();
