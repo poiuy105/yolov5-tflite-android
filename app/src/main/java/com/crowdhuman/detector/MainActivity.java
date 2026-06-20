@@ -260,12 +260,23 @@ public class MainActivity extends AppCompatActivity {
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
 
-                // Per-stage timing breakdown
+                // Per-stage timing + pixel info breakdown
                 String timingStr = String.format(
-                        "toBitmap:%dms\nrotate:%dms\nletterbox:%dms\npreprocess:%dms\ninference:%dms\ndecode:%dms\nnms:%dms\nlabel:%dms\nmap:%dms\ntotal:%dms",
-                        result.timeToBitmapMs, result.timeRotateMs, result.timeLetterboxMs,
-                        result.timePreprocessMs, result.timeInferenceMs, result.timeDecodeMs,
-                        result.timeNmsMs, result.timeLabelMs, result.timeMapMs,
+                        "[1]Camera→Bitmap: %dx%d %dms\n" +
+                        "[2]Rotate+Letterbox→%dx%d %dms\n" +
+                        "[3]Preprocess→%dx%d %dms\n" +
+                        "[4]Inference %dms\n" +
+                        "[5]Decode %dms\n" +
+                        "[6]NMS %dms\n" +
+                        "[7]Map→Preview %dx%d %dms\n" +
+                        "Total: %dms",
+                        result.imageWidth, result.imageHeight, result.timeToBitmapMs,
+                        result.renderWidth, result.renderHeight, result.timeLetterboxMs,
+                        320, 320, result.timePreprocessMs,
+                        result.timeInferenceMs,
+                        result.timeDecodeMs,
+                        result.timeNmsMs,
+                        result.frameWidth, result.frameHeight, result.timeMapMs,
                         result.costTimeMs);
                 timingTextView.setText(timingStr);
 

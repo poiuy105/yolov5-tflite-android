@@ -189,11 +189,12 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 // === Stage 6: Overlay ===
                 long timeOverlayMs = 0;
 
-                // Debug info
+                // Debug info with full pipeline dimensions
                 String debugInfo = String.format(
-                        "cam=%dx%d preview=%dx%d scale=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
-                        imgW, imgH, previewWidth, previewHeight,
-                        scale, padX, padY, renderW, renderH, offsetX, offsetY);
+                        "cam=%dx%d rot=%dx%d model=%d scale=%.3f pad=%d,%d preview=%dx%d render=%dx%d offset=%d,%d",
+                        imgW, imgH, rotW, rotH, modelSize,
+                        scale, padX, padY, previewWidth, previewHeight,
+                        renderW, renderH, offsetX, offsetY);
                 Log.d("FullImageAnalyse", debugInfo);
 
                 Log.i("PipelineTiming", String.format(
