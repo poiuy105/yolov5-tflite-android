@@ -17,7 +17,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ultralytics
+          pip install ultralytics tensorflow-cpu
 
       - name: Download YOLOv5n weights and export to TFLite 160x160
         run: |
@@ -29,7 +29,15 @@ jobs:
 
       - name: Move exported model
         run: |
-          find . -name "yolov5n-fp16-160.tflite" -exec cp {} ./yolov5n-fp16-160.tflite \;
+          find . -name '*saved_model*' -o -name '*tflite*' | head -20
+          find . -name 'yolov5n*full_integer_quant*' -o -name 'yolov5n*fp16*' | head -10
+          EXPORTED=$(find runs -name '*fp16*160*' -o -name '*160*fp16*' 2>/dev/null | head -1)
+          if [ -z "$EXPORTED" ]; then
+            EXPORTED=$(find runs -name '*.tflite' | head -1)
+          fi
+          if [ -n "$EXPORTED" ]; then
+            cp "$EXPORTED" ./yolov5n-fp16-160.tflite
+          fi
           ls -la yolov5n-fp16-160.tflite
 
       - name: Upload model artifact
