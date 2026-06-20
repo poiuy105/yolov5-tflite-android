@@ -60,6 +60,7 @@ public class Yolov5TFLiteDetector {
     private GpuDelegate gpuDelegate;
     private NnApiDelegate nnApiDelegate;
     private Interpreter.Options options;
+    private boolean usingNnApi = false;
     private List<String> associatedAxisLabels;
     private ModelConfig currentConfig;
     private final NmsProcessor nmsProcessor;
@@ -130,9 +131,10 @@ public class Yolov5TFLiteDetector {
         if (gpuDelegate != null) { gpuDelegate.close(); gpuDelegate = null; }
         if (nnApiDelegate != null) { nnApiDelegate.close(); nnApiDelegate = null; }
         options = null;
-        inputBuffer = null;
-        pixelCache = null;
+        if (inputBuffer != null) { inputBuffer = null; }
+        if (pixelCache != null) { pixelCache = null; }
         cachedImageProcessor = null;
+        usingNnApi = false;
     }
 
     /**
@@ -265,6 +267,7 @@ public class Yolov5TFLiteDetector {
             try {
                 nnApiDelegate = new NnApiDelegate();
                 options.addDelegate(nnApiDelegate);
+                usingNnApi = true;
                 Log.i("tfliteSupport", "using NNAPI delegate.");
                 return;
             } catch (Exception e) {
@@ -303,7 +306,7 @@ public class Yolov5TFLiteDetector {
             Log.e("tfliteSupport", "Interpreter or buffer not ready!");
             return new ArrayList<>();
         }
-        if (currentConfig.isInt8) {
+        if (currentConfig.isInt8 || usingNnApi) {
             return detect(bitmap);
         }
 
@@ -342,7 +345,9 @@ public class Yolov5TFLiteDetector {
             Log.e("tfliteSupport", "Interpreter or buffer not ready!");
             return new ArrayList<>();
         }
-        if (currentConfig.isInt8) {
+        // NNAPI delegate does NOT support direct ByteBuffer input (causes Native SIGSEGV on some devices).
+        // Fall back to standard TensorImage path which NNAPI handles correctly.
+        if (currentConfig.isInt8 || usingNnApi) {
             return detectWithTimings(bitmap, timings);
         }
 
