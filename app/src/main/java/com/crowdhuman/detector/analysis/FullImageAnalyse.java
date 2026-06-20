@@ -168,7 +168,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 Matrix frameToPreview = new Matrix();
                 frameToPreview.postScale((float) previewScale, (float) previewScale);
-                frameToPreview.postTranslate(offsetX, offsetY);
+                // No translate here - renderer handles offset via offsetX/offsetY
 
                 // Step 5: Render detection boxes on preview-sized canvas
                 Bitmap resultBitmap = renderer.render(recognitions, renderW, renderH,
