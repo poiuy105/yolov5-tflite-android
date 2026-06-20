@@ -263,9 +263,7 @@ public class Yolov5TFLiteDetector {
         // 1. Try NNAPI with DSP acceleration (Android 8.1+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                NnApiDelegate.Options nnapiOpts = new NnApiDelegate.Options();
-                nnapiOpts.setAllowNnapiCpu(false); // Prevent fallback to CPU (no benefit)
-                nnApiDelegate = new NnApiDelegate(nnapiOpts);
+                nnApiDelegate = new NnApiDelegate();
                 options.addDelegate(nnApiDelegate);
                 Log.i("tfliteSupport", "using NNAPI delegate.");
                 return;
