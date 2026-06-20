@@ -39,9 +39,9 @@ import java.util.Set;
 
 public class Yolov5TFLiteDetector {
 
-    // Original hardcoded sizes for 320x320 YOLOv5 models
-    private static final Size INPUT_SIZE = new Size(320, 320);
-    private static final int[] OUTPUT_SIZE = new int[]{1, 6300, 85};
+    // Default sizes for 320x320 YOLOv5 models; updated per model in initialModel()
+    private Size inputSize = new Size(320, 320);
+    private int[] outputSize = new int[]{1, 6300, 85};
     private static final float DETECT_THRESHOLD = 0.25f;
     private static final float IOU_THRESHOLD = 0.45f;
     private static final float IOU_CLASS_DUPLICATED_THRESHOLD = 0.7f;
@@ -53,7 +53,8 @@ public class Yolov5TFLiteDetector {
     // OCP: Configuration table instead of switch-case
     private static final Map<String, ModelConfig> MODEL_CONFIGS = new HashMap<>();
     static {
-        MODEL_CONFIGS.put("yolov5n", new ModelConfig("yolov5n", "yolov5n-fp16-320.tflite", "coco_label.txt", 80, false));
+        MODEL_CONFIGS.put("yolov5n-320", new ModelConfig("yolov5n-320", "yolov5n-fp16-320.tflite", "coco_label.txt", 80, false));
+        MODEL_CONFIGS.put("yolov5n-160", new ModelConfig("yolov5n-160", "yolov5n-fp16-160.tflite", "coco_label.txt", 80, false));
     }
 
     private Interpreter tflite;
@@ -92,8 +93,8 @@ public class Yolov5TFLiteDetector {
 
     public String getModelFile() { return currentConfig != null ? currentConfig.modelFile : null; }
     public String getModelKey() { return currentConfig != null ? currentConfig.key : null; }
-    public Size getInputSize() { return INPUT_SIZE; }
-    public int[] getOutputSize() { return OUTPUT_SIZE; }
+    public Size getInputSize() { return inputSize; }
+    public int[] getOutputSize() { return outputSize; }
     public int getNumClasses() { return currentConfig != null ? currentConfig.numClasses : 0; }
 
     /**
@@ -113,6 +114,16 @@ public class Yolov5TFLiteDetector {
             ByteBuffer tfliteModel = FileUtil.loadMappedFile(context, currentConfig.modelFile);
             tflite = new Interpreter(tfliteModel, options);
             Log.i("tfliteSupport", "Success reading model: " + currentConfig.modelFile);
+
+            // Auto-detect input/output sizes from model signature
+            int inputIdx = 0;
+            int inputShape[] = tflite.getInputTensor(inputIdx).shape();
+            inputSize = new Size(inputShape[2], inputShape[1]); // [1, H, W, 3]
+
+            int outputIdx = tflite.getOutputTensorCount() - 1; // last output
+            int[] outputShape = tflite.getOutputTensor(outputIdx).shape();
+            outputSize = outputShape;
+            Log.i("tfliteSupport", "Model input: " + inputSize + ", output: " + java.util.Arrays.toString(outputSize));
 
             // Load labels
             associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
@@ -152,9 +163,9 @@ public class Yolov5TFLiteDetector {
         // Run inference - original hardcoded output size and data type
         TensorBuffer outputBuffer;
         if (currentConfig.isInt8) {
-            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.UINT8);
+            outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.UINT8);
         } else {
-            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+            outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
         }
         tflite.run(input.getBuffer(), outputBuffer.getBuffer());
 
@@ -184,7 +195,7 @@ public class Yolov5TFLiteDetector {
     private TensorImage preprocessImage(Bitmap bitmap) {
         if (cachedImageProcessor == null) {
             ImageProcessor.Builder builder = new ImageProcessor.Builder()
-                    .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
+                    .add(new ResizeOp(inputSize.getHeight(), inputSize.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
                     .add(new NormalizeOp(0, 255));
             if (currentConfig.isInt8) {
                 builder.add(new QuantizeOp(INPUT_INT8_QUANT.getZeroPoint(), INPUT_INT8_QUANT.getScale()))
@@ -205,9 +216,9 @@ public class Yolov5TFLiteDetector {
     private ArrayList<Recognition> decodeOutput(float[] data) {
         ArrayList<Recognition> results = new ArrayList<>();
         float threshold = nmsProcessor.getDetectThreshold();
-        int stride = OUTPUT_SIZE[2];
+        int stride = outputSize[2];
 
-        for (int i = 0; i < OUTPUT_SIZE[1]; i++) {
+        for (int i = 0; i < outputSize[1]; i++) {
             int base = i * stride;
             float confidence = data[4 + base];
 
@@ -215,14 +226,14 @@ public class Yolov5TFLiteDetector {
             if (confidence < threshold) continue;
 
             // Decode coordinates
-            float x = data[base] * INPUT_SIZE.getWidth();
-            float y = data[1 + base] * INPUT_SIZE.getHeight();
-            float w = data[2 + base] * INPUT_SIZE.getWidth();
-            float h = data[3 + base] * INPUT_SIZE.getHeight();
+            float x = data[base] * inputSize.getWidth();
+            float y = data[1 + base] * inputSize.getHeight();
+            float w = data[2 + base] * inputSize.getWidth();
+            float h = data[3 + base] * inputSize.getHeight();
             int xmin = (int) Math.max(0, x - w / 2.);
             int ymin = (int) Math.max(0, y - h / 2.);
-            int xmax = (int) Math.min(INPUT_SIZE.getWidth(), x + w / 2.);
-            int ymax = (int) Math.min(INPUT_SIZE.getHeight(), y + h / 2.);
+            int xmax = (int) Math.min(inputSize.getWidth(), x + w / 2.);
+            int ymax = (int) Math.min(inputSize.getHeight(), y + h / 2.);
 
             // Find max class score
             int labelId = 0;
@@ -326,7 +337,7 @@ public class Yolov5TFLiteDetector {
         }
         inputBuffer.rewind();
 
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
         tflite.run(inputBuffer, outputBuffer.getBuffer());
 
         ArrayList<Recognition> allRecognitions = decodeOutput(outputBuffer.getFloatArray());
@@ -372,7 +383,7 @@ public class Yolov5TFLiteDetector {
         long t1 = System.currentTimeMillis();
         timings[0] = t1 - t0; // preprocess
 
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
         tflite.run(inputBuffer, outputBuffer.getBuffer());
 
         long t2 = System.currentTimeMillis();
@@ -415,9 +426,9 @@ public class Yolov5TFLiteDetector {
 
         TensorBuffer outputBuffer;
         if (currentConfig.isInt8) {
-            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.UINT8);
+            outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.UINT8);
         } else {
-            outputBuffer = TensorBuffer.createFixedSize(OUTPUT_SIZE, DataType.FLOAT32);
+            outputBuffer = TensorBuffer.createFixedSize(outputSize, DataType.FLOAT32);
         }
         tflite.run(input.getBuffer(), outputBuffer.getBuffer());
         long t2 = System.currentTimeMillis();
@@ -455,14 +466,14 @@ public class Yolov5TFLiteDetector {
      */
     public void initInputBuffer() {
         if (tflite == null) return;
-        int pixelCount = INPUT_SIZE.getWidth() * INPUT_SIZE.getHeight();
+        int pixelCount = inputSize.getWidth() * inputSize.getHeight();
         inputBuffer = ByteBuffer.allocateDirect(pixelCount * 3 * 4); // FLOAT32: 3 channels * 4 bytes
         inputBuffer.order(ByteOrder.nativeOrder());
         pixelCache = new int[pixelCount];
 
         // Cache ImageProcessor (build once, reuse forever)
         ImageProcessor.Builder builder = new ImageProcessor.Builder()
-                .add(new ResizeOp(INPUT_SIZE.getHeight(), INPUT_SIZE.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
+                .add(new ResizeOp(inputSize.getHeight(), inputSize.getWidth(), ResizeOp.ResizeMethod.BILINEAR))
                 .add(new NormalizeOp(0, 255));
         if (currentConfig.isInt8) {
             builder.add(new QuantizeOp(INPUT_INT8_QUANT.getZeroPoint(), INPUT_INT8_QUANT.getScale()))

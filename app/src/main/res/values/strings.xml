@@ -21,6 +21,7 @@
     <string name="filter_desc">Filter classes</string>
 
     <string-array name="model">
-        <item>yolov5n</item>
+        <item>yolov5n-320</item>
+        <item>yolov5n-160</item>
     </string-array>
 </resources>
