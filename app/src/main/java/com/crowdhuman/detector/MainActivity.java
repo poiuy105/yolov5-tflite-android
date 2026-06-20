@@ -249,6 +249,11 @@ public class MainActivity extends AppCompatActivity {
                 inferenceTimeTextView.setText(result.costTimeMs + "ms (infer " + result.inferenceTimeMs + "ms)");
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
+                // Debug info
+                Log.d("MainActivity", "Debug: " + result.debugInfo);
+                if (result.firstBox != null) {
+                    Log.d("MainActivity", "First box: " + result.firstBox.toShortString());
+                }
             }
             @Override
             public void onError(String message) {

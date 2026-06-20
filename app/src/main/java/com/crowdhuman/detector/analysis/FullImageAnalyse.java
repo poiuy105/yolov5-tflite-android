@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.RectF;
 import android.util.DisplayMetrics;
 import android.util.Log;
 
@@ -44,7 +45,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     // Bitmap pool for reuse (reduce GC pressure)
     private Bitmap pooledImageBitmap;
-    private Bitmap pooledFullImageBitmap;
     // P2-15 FIX: Reuse rgbBytes array to reduce GC pressure
     private int[] pooledRgbBytes;
 
@@ -72,9 +72,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             currentDisposable.dispose();
             currentDisposable = null;
         }
-        // P0-2 FIX: Don't recycle pooled bitmaps in dispose() - they may be in use
-        // by an ongoing analysis. They will be recycled when FullImageAnalyse is
-        // garbage collected or when dimensions change.
     }
 
     @Override
@@ -87,7 +84,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
         currentDisposable = Observable.create((ObservableEmitter<AnalyseResult> emitter) -> {
             long start = System.currentTimeMillis();
-            Bitmap cropImageBitmap = null;
             Bitmap modelInputBitmap = null;
 
             try {
@@ -98,7 +94,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 int yRowStride = planes[0].getRowStride();
                 int uvRowStride = planes[1].getRowStride();
                 int uvPixelStride = planes[1].getPixelStride();
-                // P2-15 FIX: Reuse or create rgbBytes array
+
                 if (pooledRgbBytes == null || pooledRgbBytes.length != imgH * imgW) {
                     pooledRgbBytes = new int[imgH * imgW];
                 }
@@ -112,59 +108,72 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
-                // FIT_CENTER: scale to fit within preview, preserving aspect ratio
-                double scale = Math.min(
-                        previewHeight / (double) (rotation % 180 == 0 ? imgW : imgH),
-                        previewWidth / (double) (rotation % 180 == 0 ? imgH : imgW));
-                int scaledW = (int) (scale * imgH), scaledH = (int) (scale * imgW);
-                if (scaledW <= 0 || scaledH <= 0) {
-                    emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
-                    return;
-                }
-
-                Matrix transform = imageProcess.getTransformationMatrix(imgW, imgH, scaledW, scaledH, rotation % 180 == 0 ? 90 : 0, false);
-
-                // Create fullImageBitmap at scaled size
-                if (pooledFullImageBitmap == null || pooledFullImageBitmap.getWidth() != scaledW || pooledFullImageBitmap.getHeight() != scaledH) {
-                    if (pooledFullImageBitmap != null) pooledFullImageBitmap.recycle();
-                    pooledFullImageBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888);
-                }
-                Canvas canvas = new Canvas(pooledFullImageBitmap);
-                canvas.drawBitmap(pooledImageBitmap, transform, null);
-
-                // Letterbox: scale to fit within 320x320 while preserving aspect ratio,
-                // then pad with gray borders (no cropping). This matches YOLOv5 training.
+                // Step 1: Direct letterbox from original camera frame to 320x320
+                // No intermediate rotation/scaling to preview size!
                 int modelSize = detector.getInputSize().getWidth(); // 320
-                float scaleFactor = Math.min(
-                        modelSize / (float) scaledW,
-                        modelSize / (float) scaledH);
-                int letterW = (int) (scaledW * scaleFactor);
-                int letterH = (int) (scaledH * scaleFactor);
+                float letterScale = Math.min(
+                        modelSize / (float) imgW,
+                        modelSize / (float) imgH);
+                int letterW = (int) (imgW * letterScale);
+                int letterH = (int) (imgH * letterScale);
                 int padX = (modelSize - letterW) / 2;
                 int padY = (modelSize - letterH) / 2;
 
-                // Create letterboxed bitmap
                 modelInputBitmap = Bitmap.createBitmap(modelSize, modelSize, Bitmap.Config.ARGB_8888);
                 Canvas letterCanvas = new Canvas(modelInputBitmap);
-                letterCanvas.drawColor(Color.GRAY); // YOLOv5 letterbox padding color
+                letterCanvas.drawColor(Color.GRAY);
 
                 Matrix letterMatrix = new Matrix();
-                letterMatrix.postScale(scaleFactor, scaleFactor);
+                letterMatrix.postScale(letterScale, letterScale);
                 letterMatrix.postTranslate(padX, padY);
-                letterCanvas.drawBitmap(pooledFullImageBitmap, letterMatrix, null);
+                letterCanvas.drawBitmap(pooledImageBitmap, letterMatrix, null);
 
-                // For rendering: map model output back to preview coordinates
-                // Inverse of letterbox transform
-                Matrix modelToPreview = new Matrix();
-                modelToPreview.postTranslate(-padX, -padY);
-                modelToPreview.postScale(1f / scaleFactor, 1f / scaleFactor);
-
+                // Step 2: Detect
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
                 long inferenceStart = System.currentTimeMillis();
                 ArrayList<Recognition> recognitions = detector.detect(modelInputBitmap);
                 long inferenceTimeMs = System.currentTimeMillis() - inferenceStart;
+
+                // Step 3: Map detection boxes back to original camera frame coordinates
+                // model (320x320) -> original frame (imgW x imgH)
+                Matrix modelToFrame = new Matrix();
+                modelToFrame.postTranslate(-padX, -padY);
+                modelToFrame.postScale(1f / letterScale, 1f / letterScale);
+
+                for (Recognition r : recognitions) {
+                    RectF loc = r.getLocation();
+                    modelToFrame.mapRect(loc);
+                    r.setLocation(loc);
+                }
+
+                // Step 4: Map original frame coordinates to preview coordinates for rendering
+                // This must match how PreviewView displays the camera feed
+                double previewScale = Math.min(
+                        previewHeight / (double) imgH,
+                        previewWidth / (double) imgW);
+                int renderW = (int) (previewScale * imgW);
+                int renderH = (int) (previewScale * imgH);
+                int offsetX = (previewWidth - renderW) / 2;
+                int offsetY = (previewHeight - renderH) / 2;
+
+                Matrix frameToPreview = new Matrix();
+                frameToPreview.postScale((float) previewScale, (float) previewScale);
+                frameToPreview.postTranslate(offsetX, offsetY);
+
+                // Step 5: Render detection boxes on preview-sized canvas
+                Bitmap resultBitmap = renderer.render(recognitions, renderW, renderH,
+                        frameToPreview, isFrontCamera, currentFps, offsetX, offsetY);
+
+                // Debug info
+                String debugInfo = String.format(
+                        "cam=%dx%d preview=%dx%d letter=%.3f pad=%d,%d render=%dx%d offset=%d,%d",
+                        imgW, imgH, previewWidth, previewHeight,
+                        letterScale, padX, padY, renderW, renderH, offsetX, offsetY);
+                Log.d("FullImageAnalyse", debugInfo);
+
+                RectF firstBox = recognitions.isEmpty() ? null : new RectF(recognitions.get(0).getLocation());
 
                 // Calculate FPS
                 long now = System.currentTimeMillis();
@@ -174,20 +183,14 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 lastFrameTime = now;
 
-                Bitmap resultBitmap = renderer.render(recognitions, scaledW, scaledH,
-                        modelToPreview, isFrontCamera, currentFps);
                 emitter.onNext(new AnalyseResult(now - start, inferenceTimeMs, resultBitmap, recognitions.size(),
-                        previewWidth, previewHeight, currentFps, imgW, imgH));
+                        previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
                 emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
             } finally {
-                if (cropImageBitmap != null && !cropImageBitmap.isRecycled()) cropImageBitmap.recycle();
                 if (modelInputBitmap != null && !modelInputBitmap.isRecycled()) modelInputBitmap.recycle();
-                // P0-5 FIX: Note - resultBitmap is passed to MainActivity via callback,
-                // which sets it to ImageView. ImageView manages its lifecycle.
-                // We must NOT recycle it here.
                 image.close();
             }
         }).subscribeOn(Schedulers.io())
