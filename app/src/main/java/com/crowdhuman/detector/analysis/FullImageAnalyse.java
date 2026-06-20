@@ -155,17 +155,12 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t3 = System.currentTimeMillis();
 
                 // === Stage 5: Map coordinates ===
-                // Inverse of the combined matrix to map model coords back to camera coords
+                // Use matrix inversion for accurate coordinate mapping
                 Matrix modelToCamera = new Matrix();
-                // Model (0,0) is top-left of letterbox, but image is centered with padding
-                // First remove padding
-                modelToCamera.postTranslate(-padX, -padY);
-                // Then undo scale
-                modelToCamera.postScale(1f / scale, 1f / scale);
-                // Then undo rotation (-90°)
-                modelToCamera.postRotate(-90);
-                // Then undo center translation
-                modelToCamera.postTranslate(imgW / 2f, imgH / 2f);
+                boolean invertOk = combinedMatrix.invert(modelToCamera);
+                if (!invertOk) {
+                    Log.w("FullImageAnalyse", "Matrix inversion failed, using fallback mapping");
+                }
 
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
