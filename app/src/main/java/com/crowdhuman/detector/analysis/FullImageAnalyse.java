@@ -111,35 +111,21 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 }
                 pooledImageBitmap.setPixels(pooledRgbBytes, 0, imgW, 0, 0, imgW, imgH);
 
-                // FIT_CENTER: scale to fit within preview, preserving aspect ratio
-                double scale = Math.min(
-                        previewHeight / (double) (rotation % 180 == 0 ? imgW : imgH),
-                        previewWidth / (double) (rotation % 180 == 0 ? imgH : imgW));
-                int scaledW = (int) (scale * imgH), scaledH = (int) (scale * imgW);
+                // 1:1 square processing: no rotation needed, direct scale to 320x320
+                int scaledW = imgW, scaledH = imgH;
                 if (scaledW <= 0 || scaledH <= 0) {
                     emitter.onNext(new AnalyseResult(0, null, 0, previewWidth, previewHeight, currentFps));
                     return;
                 }
 
-                Matrix transform = imageProcess.getTransformationMatrix(imgW, imgH, scaledW, scaledH, rotation % 180 == 0 ? 90 : 0, false);
-
-                // Create fullImageBitmap at scaled size
-                if (pooledFullImageBitmap == null || pooledFullImageBitmap.getWidth() != scaledW || pooledFullImageBitmap.getHeight() != scaledH) {
-                    if (pooledFullImageBitmap != null) pooledFullImageBitmap.recycle();
-                    pooledFullImageBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888);
-                }
-                Canvas canvas = new Canvas(pooledFullImageBitmap);
-                canvas.drawBitmap(pooledImageBitmap, transform, null);
-
-                // Crop the actual image region (not black bars)
-                cropImageBitmap = Bitmap.createBitmap(pooledFullImageBitmap, 0, 0, scaledW, scaledH);
-
+                // Direct scale from camera frame to model input (320x320)
                 Matrix previewToModel = imageProcess.getTransformationMatrix(
-                        cropImageBitmap.getWidth(), cropImageBitmap.getHeight(),
+                        imgW, imgH,
                         detector.getInputSize().getWidth(), detector.getInputSize().getHeight(), 0, false);
-                modelInputBitmap = Bitmap.createBitmap(cropImageBitmap, 0, 0,
-                        cropImageBitmap.getWidth(), cropImageBitmap.getHeight(), previewToModel, false);
+                modelInputBitmap = Bitmap.createBitmap(pooledImageBitmap, 0, 0,
+                        imgW, imgH, previewToModel, false);
 
+                // For rendering: scale model output back to camera frame size
                 Matrix modelToPreview = new Matrix();
                 try { previewToModel.invert(modelToPreview); }
                 catch (IllegalArgumentException e) {
