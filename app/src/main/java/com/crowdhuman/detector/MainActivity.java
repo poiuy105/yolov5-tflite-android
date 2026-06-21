@@ -205,20 +205,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initModel(String modelKey) {
-        // P0-3: Close old detector before creating new one
+        // Close old detector before creating new one
         if (detector != null) {
             detector.close();
             detector = null;
+            // GPU delegate native release is async; brief delay prevents SIGSEGV
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
         }
 
         loadingIndicator.setVisibility(View.VISIBLE);
         errorPanel.setVisibility(View.GONE);
-
-        // Close old detector to release native resources (GPU delegate, interpreter)
-        if (detector != null) {
-            detector.close();
-            detector = null;
-        }
 
         detector = new Yolov5TFLiteDetector();
         boolean valid = detector.setModelFile(modelKey);
