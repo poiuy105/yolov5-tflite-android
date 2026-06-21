@@ -47,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
     private int orientationMode = ORIENTATION_AUTO;
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
+    private Yolov5TFLiteDetector detectorSmall;  // 160 模型（运动区域推理）
     private final CameraProcess cameraProcess = new CameraProcess();
     private java.util.Set<Integer> enabledLabels = new java.util.HashSet<>();
 
@@ -205,7 +206,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initModel(String modelKey) {
-        // Close old detector before creating new one
+        // Close old detectors before creating new ones
+        if (detectorSmall != null) {
+            detectorSmall.close();
+            detectorSmall = null;
+        }
         if (detector != null) {
             detector.close();
             detector = null;
@@ -216,6 +221,7 @@ public class MainActivity extends AppCompatActivity {
         loadingIndicator.setVisibility(View.VISIBLE);
         errorPanel.setVisibility(View.GONE);
 
+        // 创建 320 模型（主模型）
         detector = new Yolov5TFLiteDetector();
         boolean valid = detector.setModelFile(modelKey);
         if (!valid) {
@@ -224,12 +230,40 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 预创建 160 模型（运动区域推理），加载失败不影响主流程
+        detectorSmall = new Yolov5TFLiteDetector();
+        boolean smallValid = detectorSmall.setModelFile("yolov5n-160");
+        if (!smallValid) {
+            Log.w("MainActivity", "160 model not available, motion region inference disabled");
+            detectorSmall = null;
+        }
+
+        // 加载 320 模型
         detector.initialModel(this, new DetectorCallback() {
             @Override public void onModelLoaded(String file) {
+                detector.initInputBuffer();
+
+                // 加载 160 模型（如果可用）
+                if (detectorSmall != null) {
+                    detectorSmall.initialModel(MainActivity.this, new DetectorCallback() {
+                        @Override public void onModelLoaded(String f) {
+                            detectorSmall.initInputBuffer();
+                            Log.i("MainActivity", "160 model loaded for motion region inference");
+                            loadingIndicator.setVisibility(View.GONE);
+                            startCameraWithCurrentMode();
+                        }
+                        @Override public void onModelError(String msg) {
+                            Log.w("MainActivity", "160 model load failed: " + msg + ", using 320 only");
+                            detectorSmall = null;
+                            loadingIndicator.setVisibility(View.GONE);
+                            startCameraWithCurrentMode();
+                        }
+                    });
+                } else {
                     loadingIndicator.setVisibility(View.GONE);
-                    detector.initInputBuffer();
                     startCameraWithCurrentMode();
                 }
+            }
             @Override public void onModelError(String msg) {
                 loadingIndicator.setVisibility(View.GONE);
                 showError(msg);
@@ -249,7 +283,7 @@ public class MainActivity extends AppCompatActivity {
         int rotation = DisplayUtils.getScreenOrientation(this);
 
         currentAnalyser = new FullImageAnalyse(this, cameraPreviewMatch, rotation,
-                detector, cameraProcess.isFrontCamera());
+                detector, detectorSmall, cameraProcess.isFrontCamera());
         currentAnalyser.setCallback(new AnalyseCallback() {
             @Override
             public void onResult(AnalyseResult result) {
@@ -280,6 +314,7 @@ public class MainActivity extends AppCompatActivity {
                             "[6]NMS %dms\n" +
                             "[7]Map\u2192Preview %dx%d %dms\n" +
                             "[M]Motion: %.4f %s\n" +
+                            "[R]Regions: %d %s cropResize=%dms\n" +
                             "Total: %dms",
                             result.imageWidth, result.imageHeight, result.timeToBitmapMs,
                             result.letterboxSize, result.letterboxSize, result.timeLetterboxMs,
@@ -289,6 +324,8 @@ public class MainActivity extends AppCompatActivity {
                             result.timeNmsMs,
                             result.frameWidth, result.frameHeight, result.timeMapMs,
                             result.motionScore, result.isSkippedFrame ? "SKIP" : "RUN",
+                            result.regionCount, result.usedSmallModel ? "160" : "320",
+                            result.timeCropResizeMs,
                             result.costTimeMs);
                 } else {
                     timingStr = String.format("Total: %dms | FPS: %.1f | %s",
@@ -476,5 +513,6 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         if (currentAnalyser != null) { currentAnalyser.dispose(); currentAnalyser = null; }
         if (detector != null) { detector.close(); detector = null; }
+        if (detectorSmall != null) { detectorSmall.close(); detectorSmall = null; }
     }
 }

@@ -51,18 +51,26 @@ public class AnalyseResult {
     public final float motionScore;       // 运动分数（帧差法）
     public final boolean isSkippedFrame;  // 是否跳过了YOLO推理
 
+    // 运动区域推理相关（160 模型裁剪推理管线）
+    public final long timeRegionExtractMs; // 分块网格 + 区域提取耗时
+    public final long timeCropResizeMs;    // 裁剪 + resize 总耗时（所有区域）
+    public final int regionCount;          // 本次处理运动区域数量
+    public final boolean usedSmallModel;   // 是否使用了 160 小模型
+
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
         this(costTimeMs, 0L, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", (RectF) null,
                 null, null, false, 0, 0, 0, 0, 0, 0f, false,
-                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                0L, 0L, 0, false);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight) {
         this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", (RectF) null,
                 null, null, false, 0, 0, 0, 0, 0, 0f, false,
-                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                0L, 0L, 0, false);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
@@ -70,7 +78,8 @@ public class AnalyseResult {
                          String debugInfo, RectF firstBox) {
         this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps,
                 imageWidth, imageHeight, debugInfo, firstBox, null, null, false, 0, 0, 0, 0, 0, 0f, false,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0L, 0L, 0, false);
     }
 
     // Full constructor with overlay data and timing breakdown
@@ -83,7 +92,9 @@ public class AnalyseResult {
                          float motionScore, boolean isSkippedFrame,
                          long timeToBitmapMs, long timeRotateMs, long timeLetterboxMs,
                          long timePreprocessMs, long timeInferenceMs, long timeDecodeMs,
-                         long timeNmsMs, long timeLabelMs, long timeMapMs, long timeOverlayMs) {
+                         long timeNmsMs, long timeLabelMs, long timeMapMs, long timeOverlayMs,
+                         long timeRegionExtractMs, long timeCropResizeMs,
+                         int regionCount, boolean usedSmallModel) {
         this.costTimeMs = costTimeMs;
         this.inferenceTimeMs = inferenceTimeMs;
         this.resultBitmap = resultBitmap;
@@ -115,5 +126,9 @@ public class AnalyseResult {
         this.timeLabelMs = timeLabelMs;
         this.timeMapMs = timeMapMs;
         this.timeOverlayMs = timeOverlayMs;
+        this.timeRegionExtractMs = timeRegionExtractMs;
+        this.timeCropResizeMs = timeCropResizeMs;
+        this.regionCount = regionCount;
+        this.usedSmallModel = usedSmallModel;
     }
 }

@@ -5,6 +5,8 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.util.Log;
 
@@ -13,10 +15,11 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
+import com.crowdhuman.detector.detector.BlockMotionGrid;
+import com.crowdhuman.detector.detector.NmsProcessor;
 import com.crowdhuman.detector.detector.Yolov5TFLiteDetector;
 import com.crowdhuman.detector.detector.MotionDetector;
 import com.crowdhuman.detector.detector.MotionTracker;
-import com.crowdhuman.detector.utils.ImageProcess;
 import com.crowdhuman.detector.utils.Recognition;
 
 import java.util.ArrayList;
@@ -31,31 +34,43 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     private final PreviewView previewView;
     private final int rotation;
-    private final Yolov5TFLiteDetector detector;
-    private final ImageProcess imageProcess;
+    private final Yolov5TFLiteDetector detector;       // 320 模型（全帧 / 回退）
+    private final Yolov5TFLiteDetector detectorSmall;   // 160 模型（运动区域推理）
     private final boolean isFrontCamera;
     private AnalyseCallback callback;
     private Disposable currentDisposable;
     private java.util.Set<Integer> enabledLabels;
 
-    // FPS calculation - P1-6 FIX: volatile for thread visibility
+    // FPS calculation
     private volatile long lastFrameTime = 0;
     private volatile float currentFps = 0;
     private static final float FPS_ALPHA = 0.9f;
 
-    // Pre-allocated Bitmap for letterbox (avoid per-frame allocation)
+    // Pre-allocated Bitmaps (avoid per-frame allocation)
     private Bitmap reusedLetterboxBitmap;
+    private Bitmap reusedCropBitmap;
 
-    // 运动检测和跟踪
+    // 运动检测、分块网格、跟踪
     private final MotionDetector motionDetector = new MotionDetector();
     private final MotionTracker motionTracker = new MotionTracker();
+    private final BlockMotionGrid blockMotionGrid = new BlockMotionGrid(4);
+
+    // 周期性全帧刷新
+    private static final int FULL_REFRESH_INTERVAL = 15;
+    private int frameCounter = 0;
+
+    // 跨区域 NMS
+    private static final float CROSS_REGION_IOU = 0.45f;
+    private final NmsProcessor crossRegionNms = new NmsProcessor(0f, CROSS_REGION_IOU);
 
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
-                           Yolov5TFLiteDetector detector, boolean isFrontCamera) {
+                           Yolov5TFLiteDetector detector,
+                           Yolov5TFLiteDetector detectorSmall,
+                           boolean isFrontCamera) {
         this.previewView = previewView;
         this.rotation = rotation;
         this.detector = detector;
-        this.imageProcess = new ImageProcess();
+        this.detectorSmall = detectorSmall;
         this.isFrontCamera = isFrontCamera;
     }
 
@@ -74,6 +89,13 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         }
     }
 
+    private void ensureCropBitmap(int size) {
+        if (reusedCropBitmap == null || reusedCropBitmap.getWidth() != size) {
+            if (reusedCropBitmap != null) reusedCropBitmap.recycle();
+            reusedCropBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        }
+    }
+
     public void dispose() {
         if (currentDisposable != null && !currentDisposable.isDisposed()) {
             currentDisposable.dispose();
@@ -82,6 +104,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         if (reusedLetterboxBitmap != null) {
             reusedLetterboxBitmap.recycle();
             reusedLetterboxBitmap = null;
+        }
+        if (reusedCropBitmap != null) {
+            reusedCropBitmap.recycle();
+            reusedCropBitmap = null;
         }
     }
 
@@ -107,7 +133,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 int imgH = cameraBitmap.getHeight();
 
                 // Safety: if CameraX returns an unreasonably large frame, downscale immediately.
-                // This prevents CPU bottleneck on rotate/letterbox operations.
                 final int MAX_CAMERA_DIM = 960;
                 if (imgW > MAX_CAMERA_DIM || imgH > MAX_CAMERA_DIM) {
                     Log.w("FullImageAnalyse", "Camera frame too large: " + imgW + "x" + imgH
@@ -125,79 +150,182 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
-                // === Stage 1.5: 运动检测（帧差法） ===
+                // === Stage 1.5: 运动检测（帧差法 + 掩码输出） ===
                 long tMotionStart = System.currentTimeMillis();
                 float motionScore = motionDetector.computeMotionScore(cameraBitmap);
                 boolean hasMotion = motionDetector.isMotionDetected();
                 long timeMotionMs = System.currentTimeMillis() - tMotionStart;
 
-                // === Stage 2+3: Combined rotate + letterbox in ONE drawBitmap ===
-                // Instead of: camera -> rotateBitmap -> letterboxBitmap (2 draws)
-                // We do: camera -> letterboxBitmap (1 draw with combined matrix)
-                int modelSize = detector.getInputSize().getWidth();
-
-                // Camera frame is landscape (e.g. 640x480), screen is portrait
-                // We need to: rotate 90° + scale to fit 320x320 + add gray padding
-                // Combined transform: rotate around center -> scale -> translate to fit
-                float scale = Math.min(
-                        modelSize / (float) imgH,  // after rotation, width becomes imgH
-                        modelSize / (float) imgW); // after rotation, height becomes imgW
-                int scaledW = (int) (imgH * scale);
-                int scaledH = (int) (imgW * scale);
-                int padX = (modelSize - scaledW) / 2;
-                int padY = (modelSize - scaledH) / 2;
-
-                ensureLetterboxBitmap(modelSize);
-                Canvas letterCanvas = new Canvas(reusedLetterboxBitmap);
-                letterCanvas.drawColor(Color.GRAY);
-
-                // Combined matrix: rotate 90° around camera center, then scale, then translate
-                Matrix combinedMatrix = new Matrix();
-                // Step 1: move to center for rotation
-                combinedMatrix.postTranslate(-imgW / 2f, -imgH / 2f);
-                // Step 2: rotate 90°
-                combinedMatrix.postRotate(90);
-                // Step 3: scale
-                combinedMatrix.postScale(scale, scale);
-                // Step 4: move to the center of the padded area
-                combinedMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
-
-                letterCanvas.drawBitmap(cameraBitmap, combinedMatrix, null);
-                t2 = System.currentTimeMillis();
-                long timeRotateLetterboxMs = t2 - t1;
-                // For display compatibility, report rotate=0, letterbox=combined
-                long timeRotateMs = 0;
-                long timeLetterboxMs = timeRotateLetterboxMs;
-
-                // === Stage 4: 条件推理（运动检测+跟踪） ===
-                if (enabledLabels != null) {
-                    detector.setEnabledLabels(enabledLabels);
+                // === Stage 1.6: 分块运动网格 → 区域提取 ===
+                long tRegionStart = System.currentTimeMillis();
+                byte[] mask = motionDetector.getMotionMask();
+                int maskW = motionDetector.getMaskWidth();
+                int maskH = motionDetector.getMaskHeight();
+                BlockMotionGrid.ExtractionResult extraction = null;
+                if (hasMotion && mask != null && maskW > 0 && maskH > 0) {
+                    extraction = blockMotionGrid.extract(mask, maskW, maskH, imgW, imgH);
                 }
+                long timeRegionExtractMs = System.currentTimeMillis() - tRegionStart;
 
-                ArrayList<Recognition> recognitions;
-                long timePreprocessMs, timeInferenceMs, timeDecodeMs, timeNmsMs, timeLabelMs;
+                // 周期性全帧刷新：每 N 帧强制使用 320 全帧推理
+                frameCounter++;
+                boolean periodicRefresh = (frameCounter % FULL_REFRESH_INTERVAL == 0);
+
+                // === 决策分支 ===
+                // 确定推理路径：区域160模型 / 全帧320模型 / 跳过
+                boolean useSmallModel = false;
+                boolean useFullFrame = false;
                 boolean wasSkipped = false;
+                int regionCount = 0;
+                ArrayList<Rect> motionRegions = null;
 
-                if (!hasMotion && motionTracker.getTrackCount() == 0) {
-                    // 无运动且无跟踪对象 → 跳过YOLO推理
-                    recognitions = new ArrayList<>();
-                    timePreprocessMs = 0;
-                    timeInferenceMs = 0;
-                    timeDecodeMs = 0;
-                    timeNmsMs = 0;
-                    timeLabelMs = 0;
+                if (periodicRefresh) {
+                    // 周期刷新 → 全帧 320
+                    useFullFrame = true;
+                } else if (extraction != null && extraction.shouldFallback) {
+                    // 运动覆盖过大 → 全帧 320
+                    useFullFrame = true;
+                } else if (!hasMotion && motionTracker.getTrackCount() == 0) {
+                    // 无运动且无跟踪 → 跳过
                     wasSkipped = true;
                 } else if (!hasMotion && motionTracker.getTrackCount() > 0) {
-                    // 无运动但有跟踪对象 → 使用跟踪器预测位置
-                    recognitions = motionTracker.predict();
-                    timePreprocessMs = 0;
-                    timeInferenceMs = 0;
-                    timeDecodeMs = 0;
-                    timeNmsMs = 0;
-                    timeLabelMs = 0;
+                    // 无运动但有跟踪 → 跳过（Tracker 预测）
                     wasSkipped = true;
+                } else if (extraction != null && !extraction.regions.isEmpty()) {
+                    // 有运动区域 → 160 模型
+                    useSmallModel = true;
+                    motionRegions = extraction.regions;
+                    regionCount = motionRegions.size();
                 } else {
-                    // 有运动 → 运行YOLO推理
+                    // 有运动但提取失败（罕见）→ 全帧 320
+                    useFullFrame = true;
+                }
+
+                // === 推理路径 ===
+                ArrayList<Recognition> recognitions;
+                long timePreprocessMs = 0, timeInferenceMs = 0, timeDecodeMs = 0;
+                long timeNmsMs = 0, timeLabelMs = 0, timeCropResizeMs = 0;
+                int modelSize = detector.getInputSize().getWidth();
+
+                if (enabledLabels != null) {
+                    detector.setEnabledLabels(enabledLabels);
+                    if (detectorSmall != null) detectorSmall.setEnabledLabels(enabledLabels);
+                }
+
+                if (wasSkipped) {
+                    // ====== 跳过推理 ======
+                    if (motionTracker.getTrackCount() > 0) {
+                        recognitions = motionTracker.predict();
+                    } else {
+                        recognitions = new ArrayList<>();
+                    }
+
+                } else if (useSmallModel && detectorSmall != null && motionRegions != null) {
+                    // ====== 运动区域 + 160 模型推理 ======
+                    int smallSize = detectorSmall.getInputSize().getWidth();
+                    ensureCropBitmap(smallSize);
+                    Canvas cropCanvas = new Canvas(reusedCropBitmap);
+                    Paint smoothPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+
+                    long timeCropStart = System.currentTimeMillis();
+                    ArrayList<Recognition> allRegionDetections = new ArrayList<>();
+                    long totalPreprocess = 0, totalInference = 0, totalDecode = 0;
+                    long totalNms = 0, totalLabel = 0;
+
+                    for (Rect cropRect : motionRegions) {
+                        // 1. 裁剪 + 旋转 + letterbox → smallSize x smallSize
+                        int cropW = cropRect.width();
+                        int cropH = cropRect.height();
+                        float cropScale = Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
+                        int scaledW = (int) (cropH * cropScale);  // 旋转后 cropH 变宽
+                        int scaledH = (int) (cropW * cropScale);  // 旋转后 cropW 变高
+                        int padX = (smallSize - scaledW) / 2;
+                        int padY = (smallSize - scaledH) / 2;
+
+                        Matrix cropMatrix = new Matrix();
+                        cropMatrix.postTranslate(-cropRect.left - cropW / 2f, -cropRect.top - cropH / 2f);
+                        cropMatrix.postRotate(90);
+                        cropMatrix.postScale(cropScale, cropScale);
+                        cropMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
+
+                        cropCanvas.drawColor(Color.GRAY);
+                        cropCanvas.drawBitmap(cameraBitmap, cropMatrix, smoothPaint);
+
+                        // 2. 推理（160 模型）
+                        long[] detectTimings = new long[6];
+                        ArrayList<Recognition> detections =
+                                detectorSmall.detectZeroCopyWithTimings(reusedCropBitmap, detectTimings);
+                        totalPreprocess += detectTimings[0];
+                        totalInference += detectTimings[1];
+                        totalDecode += detectTimings[2];
+                        totalNms += detectTimings[3];
+                        totalLabel += detectTimings[4];
+
+                        // 3. 坐标映射：160 模型空间 → 原始帧坐标
+                        Matrix cropToFrame = new Matrix();
+                        boolean invertOk = cropMatrix.invert(cropToFrame);
+                        if (invertOk) {
+                            for (Recognition det : detections) {
+                                RectF loc = det.getLocation();
+                                cropToFrame.mapRect(loc);
+                                det.setLocation(loc);
+                            }
+                        } else {
+                            Log.w("FullImageAnalyse", "Crop matrix inversion failed!");
+                        }
+
+                        allRegionDetections.addAll(detections);
+                    }
+                    timeCropResizeMs = System.currentTimeMillis() - timeCropStart;
+
+                    // 4. 跨区域 NMS（同类去重 + 跨类去重）
+                    long tCrossNms = System.currentTimeMillis();
+                    if (allRegionDetections.size() > 1) {
+                        recognitions = crossRegionNms.suppress(
+                                allRegionDetections,
+                                detectorSmall.getNumClasses(),
+                                0.70f);  // 跨类去重 IOU
+                    } else {
+                        recognitions = allRegionDetections;
+                    }
+                    long timeCrossNmsMs = System.currentTimeMillis() - tCrossNms;
+
+                    // 汇总计时
+                    timePreprocessMs = totalPreprocess;
+                    timeInferenceMs = totalInference;
+                    timeDecodeMs = totalDecode;
+                    timeNmsMs = totalNms + timeCrossNmsMs;
+                    timeLabelMs = totalLabel;
+
+                    // 更新 Tracker
+                    motionTracker.update(recognitions);
+
+                } else {
+                    // ====== 全帧 320 模型推理（原有路径） ======
+                    int fullModelSize = detector.getInputSize().getWidth();
+
+                    // Rotate + letterbox
+                    float scale = Math.min(
+                            fullModelSize / (float) imgH,
+                            fullModelSize / (float) imgW);
+                    int scaledW = (int) (imgH * scale);
+                    int scaledH = (int) (imgW * scale);
+                    int padX = (fullModelSize - scaledW) / 2;
+                    int padY = (fullModelSize - scaledH) / 2;
+
+                    ensureLetterboxBitmap(fullModelSize);
+                    Canvas letterCanvas = new Canvas(reusedLetterboxBitmap);
+                    letterCanvas.drawColor(Color.GRAY);
+
+                    Matrix combinedMatrix = new Matrix();
+                    combinedMatrix.postTranslate(-imgW / 2f, -imgH / 2f);
+                    combinedMatrix.postRotate(90);
+                    combinedMatrix.postScale(scale, scale);
+                    combinedMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
+
+                    letterCanvas.drawBitmap(cameraBitmap, combinedMatrix, null);
+
+                    // 推理
                     long[] detectTimings = new long[6];
                     recognitions = detector.detectZeroCopyWithTimings(reusedLetterboxBitmap, detectTimings);
                     timePreprocessMs = detectTimings[0];
@@ -205,53 +333,86 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     timeDecodeMs = detectTimings[2];
                     timeNmsMs = detectTimings[3];
                     timeLabelMs = detectTimings[4];
-                    // 更新跟踪器（注意：此时坐标仍在模型空间，但跟踪器只关心相对位置）
+
+                    // 坐标映射：letterbox → 相机帧
+                    Matrix modelToCamera = new Matrix();
+                    combinedMatrix.invert(modelToCamera);
+                    for (Recognition r : recognitions) {
+                        RectF loc = r.getLocation();
+                        modelToCamera.mapRect(loc);
+                    }
+
+                    // 更新 Tracker
                     motionTracker.update(recognitions);
+
+                    // 跳到坐标映射（已完成 letterbox → camera）
+                    // 下面统一处理 camera → preview
+                    t2 = System.currentTimeMillis();
+                    long timeRotateLetterboxMs = t2 - t1;
+                    long timeRotateMs = 0;
+                    long timeLetterboxMs = timeRotateLetterboxMs;
+
+                    // === Map to preview ===
+                    PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight);
+                    for (Recognition r : recognitions) {
+                        RectF loc = r.getLocation();
+                        if (isFrontCamera) {
+                            float centerX = imgW / 2f;
+                            float left = 2 * centerX - loc.right;
+                            float right = 2 * centerX - loc.left;
+                            loc.left = left;
+                            loc.right = right;
+                        }
+                        pvt.matrix.mapRect(loc);
+                        r.setLocation(loc);
+                    }
+                    t4 = System.currentTimeMillis();
+                    long timeMapMs = t4 - t2;
+
+                    // 构建并发送结果
+                    long now = System.currentTimeMillis();
+                    currentFps = updateFps(now);
+                    long totalTimeMs = now - start;
+
+                    String debugInfo = String.format(
+                            "cam=%dx%d model=%d motion=%.4f skip=%b tracks=%d regions=%d small=%b refresh=%b",
+                            imgW, imgH, fullModelSize, motionScore, wasSkipped,
+                            motionTracker.getTrackCount(), regionCount, useSmallModel, periodicRefresh);
+                    Log.d("FullImageAnalyse", debugInfo);
+
+                    Log.i("PipelineTiming", String.format(
+                            "toBitmap=%dms motion=%dms regionExtract=%dms rotate+letterbox=%dms " +
+                            "preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms " +
+                            "cropResize=%dms total=%dms",
+                            timeToBitmapMs, timeMotionMs, timeRegionExtractMs, timeRotateLetterboxMs,
+                            timePreprocessMs, timeInferenceMs, timeDecodeMs,
+                            timeNmsMs, timeLabelMs, timeMapMs, timeCropResizeMs,
+                            totalTimeMs));
+
+                    RectF firstBox = recognitions.isEmpty() ? null : new RectF(recognitions.get(0).getLocation());
+
+                    emitter.onNext(new AnalyseResult(
+                            totalTimeMs, timeInferenceMs, null, recognitions.size(),
+                            previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
+                            recognitions, pvt.matrix, isFrontCamera, pvt.offsetX, pvt.offsetY, pvt.renderW, pvt.renderH,
+                            fullModelSize, motionScore, wasSkipped,
+                            timeToBitmapMs, timeRotateMs, timeLetterboxMs,
+                            timePreprocessMs, timeInferenceMs, timeDecodeMs,
+                            timeNmsMs, timeLabelMs, timeMapMs, 0L,
+                            timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel));
+                    return;  // 提前返回，避免重复处理
                 }
-                t3 = System.currentTimeMillis();
 
-                // === Stage 5: Map coordinates ===
-                // Use combinedMatrix.invert() to map letterbox coords back to camera coords,
-                // then apply preview transform (rotate 90° + scale to preview).
-                Matrix modelToCamera = new Matrix();
-                boolean invertOk = combinedMatrix.invert(modelToCamera);
-                if (!invertOk) {
-                    Log.w("FullImageAnalyse", "Matrix inversion failed!");
-                }
+                // === 非全帧路径：坐标映射 camera → preview ===
+                t2 = System.currentTimeMillis();
+                long timeRotateLetterboxMs = 0;
+                long timeRotateMs = 0;
+                long timeLetterboxMs = 0;
 
-                // Camera (640x480 landscape) -> Preview (portrait)
-                // CameraX preview rotates the image 90° to display upright.
-                // Build camera -> preview transform using the SAME structure as combinedMatrix,
-                // but with previewScale instead of letterbox scale, and preview centering.
-                float previewScale = Math.min(
-                        previewWidth / (float) imgH,   // preview width / camera height (after rotation)
-                        previewHeight / (float) imgW); // preview height / camera width (after rotation)
-                int renderW = (int) (imgH * previewScale);  // after 90° rotation, camera height becomes width
-                int renderH = (int) (imgW * previewScale);  // after 90° rotation, camera width becomes height
-                int offsetX = (previewWidth - renderW) / 2;
-                int offsetY = (previewHeight - renderH) / 2;
-
-                // Build camera -> preview transform:
-                // Same structure as combinedMatrix but with previewScale and preview offset
-                Matrix cameraToPreview = new Matrix();
-                // Step 1: move to camera center
-                cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
-                // Step 2: rotate 90° (same direction as combinedMatrix)
-                cameraToPreview.postRotate(90);
-                // Step 3: scale to preview
-                cameraToPreview.postScale(previewScale, previewScale);
-                // Step 4: move to preview center (with offset)
-                cameraToPreview.postTranslate(offsetX + renderW / 2f, offsetY + renderH / 2f);
-
-                // Apply: letterbox -> camera -> preview
+                PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight);
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
-                    // 1. Map from model letterbox space back to camera (landscape) space
-                    modelToCamera.mapRect(loc);
-
-                    // 2. Front camera: horizontal mirror IN CAMERA SPACE
-                    //    This must happen BEFORE cameraToPreview transform because
-                    //    the mirror axis is the camera's center line.
+                    // 前摄镜像
                     if (isFrontCamera) {
                         float centerX = imgW / 2f;
                         float left = 2 * centerX - loc.right;
@@ -259,50 +420,49 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         loc.left = left;
                         loc.right = right;
                     }
-
-                    // 3. Map from camera space to preview (screen) space
-                    cameraToPreview.mapRect(loc);
+                    pvt.matrix.mapRect(loc);
                     r.setLocation(loc);
                 }
                 t4 = System.currentTimeMillis();
-                long timeMapMs = t4 - t3;
+                long timeMapMs = t4 - t2;
 
-                // === Stage 6: Overlay ===
-                long timeOverlayMs = 0;
+                // === 构建结果 ===
+                long now = System.currentTimeMillis();
+                currentFps = updateFps(now);
+                long totalTimeMs = now - start;
 
-                // Debug info with full pipeline dimensions
                 String debugInfo = String.format(
-                        "cam=%dx%d model=%d motion=%.4f skip=%b tracks=%d",
-                        imgW, imgH, modelSize, motionScore, wasSkipped, motionTracker.getTrackCount());
+                        "cam=%dx%d model=%d motion=%.4f skip=%b tracks=%d regions=%d small=%b refresh=%b",
+                        imgW, imgH, useSmallModel ? detectorSmall.getInputSize().getWidth() : modelSize,
+                        motionScore, wasSkipped, motionTracker.getTrackCount(),
+                        regionCount, useSmallModel, periodicRefresh);
                 Log.d("FullImageAnalyse", debugInfo);
 
                 Log.i("PipelineTiming", String.format(
-                        "toBitmap=%dms motion=%dms rotate+letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
-                        timeToBitmapMs, timeMotionMs, timeRotateLetterboxMs,
+                        "toBitmap=%dms motion=%dms regionExtract=%dms " +
+                        "preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms " +
+                        "cropResize=%dms total=%dms",
+                        timeToBitmapMs, timeMotionMs, timeRegionExtractMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
-                        timeNmsMs, timeLabelMs, timeMapMs,
-                        System.currentTimeMillis() - start));
+                        timeNmsMs, timeLabelMs, timeMapMs, timeCropResizeMs,
+                        totalTimeMs));
 
                 RectF firstBox = recognitions.isEmpty() ? null : new RectF(recognitions.get(0).getLocation());
 
-                // Calculate FPS
-                long now = System.currentTimeMillis();
-                if (lastFrameTime > 0) {
-                    float instantFps = 1000f / (now - lastFrameTime);
-                    currentFps = FPS_ALPHA * currentFps + (1 - FPS_ALPHA) * instantFps;
-                }
-                lastFrameTime = now;
-
-                long totalTimeMs = now - start;
+                // 为 overlay 提供 letterbox 参数（非全帧路径使用 crop 尺寸）
+                int effectiveLetterboxSize = useSmallModel
+                        ? detectorSmall.getInputSize().getWidth()
+                        : modelSize;
 
                 emitter.onNext(new AnalyseResult(
                         totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
-                        recognitions, cameraToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
-                        modelSize, motionScore, wasSkipped,
+                        recognitions, pvt.matrix, isFrontCamera, pvt.offsetX, pvt.offsetY, pvt.renderW, pvt.renderH,
+                        effectiveLetterboxSize, motionScore, wasSkipped,
                         timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
-                        timeNmsMs, timeLabelMs, timeMapMs, timeOverlayMs));
+                        timeNmsMs, timeLabelMs, timeMapMs, 0L,
+                        timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel));
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
@@ -316,5 +476,49 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         result -> { if (callback != null) callback.onResult(result); },
                         error -> { Log.e("FullImageAnalyse", "RxJava error: " + error.getMessage(), error); if (callback != null) callback.onError(error.getMessage()); }
                 );
+    }
+
+    /**
+     * Camera → Preview 变换结果：矩阵 + 布局参数。
+     */
+    static class PreviewTransform {
+        final Matrix matrix;
+        final int offsetX, offsetY, renderW, renderH;
+        PreviewTransform(Matrix m, int ox, int oy, int rw, int rh) {
+            this.matrix = m; this.offsetX = ox; this.offsetY = oy;
+            this.renderW = rw; this.renderH = rh;
+        }
+    }
+
+    /**
+     * 构建 camera (landscape) → preview (portrait) 坐标变换矩阵。
+     * 与原有管线保持一致：旋转 90° + 缩放 + 居中偏移。
+     */
+    private PreviewTransform buildCameraToPreview(int imgW, int imgH, int previewW, int previewH) {
+        float previewScale = Math.min(previewW / (float) imgH, previewH / (float) imgW);
+        int renderW = (int) (imgH * previewScale);
+        int renderH = (int) (imgW * previewScale);
+        int offsetX = (previewW - renderW) / 2;
+        int offsetY = (previewH - renderH) / 2;
+
+        Matrix cameraToPreview = new Matrix();
+        cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
+        cameraToPreview.postRotate(90);
+        cameraToPreview.postScale(previewScale, previewScale);
+        cameraToPreview.postTranslate(offsetX + renderW / 2f, offsetY + renderH / 2f);
+
+        return new PreviewTransform(cameraToPreview, offsetX, offsetY, renderW, renderH);
+    }
+
+    /**
+     * 更新 FPS（指数加权移动平均）。
+     */
+    private float updateFps(long now) {
+        if (lastFrameTime > 0) {
+            float instantFps = 1000f / (now - lastFrameTime);
+            currentFps = FPS_ALPHA * currentFps + (1 - FPS_ALPHA) * instantFps;
+        }
+        lastFrameTime = now;
+        return currentFps;
     }
 }

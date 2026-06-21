@@ -22,6 +22,11 @@ public class MotionDetector {
 
     private float lastMotionScore = 0.0f;
 
+    // 二值运动掩码：160x120 (downW x downH)，1=运动，0=静止
+    private byte[] motionMask;
+    private int maskWidth;
+    private int maskHeight;
+
     /**
      * 计算当前帧的运动分数。
      * 将当前帧降采样并转为灰度，与上一帧比较，返回 0.0-1.0 的运动分数。
@@ -66,15 +71,33 @@ public class MotionDetector {
 
         if (prevGrayPixels != null && prevGrayPixels.length >= totalPixels
                 && prevWidth == downW && prevHeight == downH) {
-            // 与上一帧比较
+            // 按需分配或复用掩码数组
+            if (motionMask == null || motionMask.length < totalPixels) {
+                motionMask = new byte[totalPixels];
+            }
+            maskWidth = downW;
+            maskHeight = downH;
+
+            // 与上一帧比较，同时记录逐像素掩码
             int diffCount = 0;
             for (int i = 0; i < totalPixels; i++) {
                 int diff = Math.abs(currentGrayPixels[i] - prevGrayPixels[i]);
                 if (diff > pixelDiffThreshold) {
+                    motionMask[i] = 1;
                     diffCount++;
+                } else {
+                    motionMask[i] = 0;
                 }
             }
             score = (float) diffCount / totalPixels;
+        } else {
+            // 首帧无前帧，清空掩码
+            if (motionMask == null || motionMask.length < totalPixels) {
+                motionMask = new byte[totalPixels];
+            }
+            maskWidth = downW;
+            maskHeight = downH;
+            java.util.Arrays.fill(motionMask, 0, totalPixels, (byte) 0);
         }
 
         // 交换：当前帧变为上一帧
@@ -136,6 +159,31 @@ public class MotionDetector {
     }
 
     /**
+     * 获取二值运动掩码（降采样后的灰度分辨率）。
+     * 掩码尺寸为 maskWidth x maskHeight（通常 160x120），
+     * 1 表示该像素有运动，0 表示静止。
+     *
+     * @return 掩码数组引用（勿修改），无运动时返回 null
+     */
+    public byte[] getMotionMask() {
+        return motionMask;
+    }
+
+    /**
+     * 获取运动掩码的宽度（通常 160）。
+     */
+    public int getMaskWidth() {
+        return maskWidth;
+    }
+
+    /**
+     * 获取运动掩码的高度（通常 120）。
+     */
+    public int getMaskHeight() {
+        return maskHeight;
+    }
+
+    /**
      * 重置检测器状态，清除上一帧数据。
      */
     public void reset() {
@@ -144,6 +192,9 @@ public class MotionDetector {
         prevWidth = 0;
         prevHeight = 0;
         lastMotionScore = 0.0f;
+        motionMask = null;
+        maskWidth = 0;
+        maskHeight = 0;
     }
 
     /**
