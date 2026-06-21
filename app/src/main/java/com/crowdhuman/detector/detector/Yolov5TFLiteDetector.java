@@ -169,6 +169,8 @@ public class Yolov5TFLiteDetector {
         if (pixelCache != null) { pixelCache = null; }
         cachedImageProcessor = null;
         usingNnApi = false;
+        isOutputTransposed = false;
+        isAnchorBased = true;
     }
 
     /**

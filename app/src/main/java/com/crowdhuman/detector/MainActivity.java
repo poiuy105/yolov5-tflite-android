@@ -207,6 +207,12 @@ public class MainActivity extends AppCompatActivity {
         loadingIndicator.setVisibility(View.VISIBLE);
         errorPanel.setVisibility(View.GONE);
 
+        // Close old detector to release native resources (GPU delegate, interpreter)
+        if (detector != null) {
+            detector.close();
+            detector = null;
+        }
+
         detector = new Yolov5TFLiteDetector();
         boolean valid = detector.setModelFile(modelKey);
         if (!valid) {
