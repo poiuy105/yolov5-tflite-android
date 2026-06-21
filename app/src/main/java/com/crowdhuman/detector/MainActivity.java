@@ -267,15 +267,17 @@ public class MainActivity extends AppCompatActivity {
 
                 // Per-stage timing + pixel info breakdown
                 String timingStr = String.format(
-                        "[1]Camera→Bitmap: %dx%d %dms\n" +
-                        "[2]Rotate+Letterbox: %dx%d→%dx%d %dms\n" +
-                        "[3]Preprocess→%dx%d %dms\n" +
+                        "[1]Camera\u2192Bitmap: %dx%d %dms\n" +
+                        "[M]Motion: %.4f %s\n" +
+                        "[2]Rotate+Letterbox: %dx%d\u2192%dx%d %dms\n" +
+                        "[3]Preprocess\u2192%dx%d %dms\n" +
                         "[4]Inference %dms\n" +
                         "[5]Decode %dms\n" +
                         "[6]NMS %dms\n" +
-                        "[7]Map→PreviewView: %dx%d %dms\n" +
+                        "[7]Map\u2192PreviewView: %dx%d %dms\n" +
                         "Total: %dms",
                         result.imageWidth, result.imageHeight, result.timeToBitmapMs,
+                        result.motionScore, result.isSkippedFrame ? "SKIP" : "RUN",
                         result.imageHeight, result.imageWidth, result.letterboxSize, result.letterboxSize, result.timeLetterboxMs,
                         result.letterboxSize, result.letterboxSize, result.timePreprocessMs,
                         result.timeInferenceMs,

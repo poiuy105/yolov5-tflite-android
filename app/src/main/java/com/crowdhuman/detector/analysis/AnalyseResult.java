@@ -47,18 +47,22 @@ public class AnalyseResult {
     public final String debugInfo;
     public final RectF firstBox;
 
+    // 运动检测相关
+    public final float motionScore;       // 运动分数（帧差法）
+    public final boolean isSkippedFrame;  // 是否跳过了YOLO推理
+
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
         this(costTimeMs, 0L, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", (RectF) null,
                 null, null, false, 0, 0, 0, 0, 0,
-                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0f, false);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps, int imageWidth, int imageHeight) {
         this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps, imageWidth, imageHeight, "", (RectF) null,
                 null, null, false, 0, 0, 0, 0, 0,
-                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0f, false);
     }
 
     public AnalyseResult(long costTimeMs, long inferenceTimeMs, Bitmap resultBitmap, int detectCount,
@@ -66,7 +70,7 @@ public class AnalyseResult {
                          String debugInfo, RectF firstBox) {
         this(costTimeMs, inferenceTimeMs, resultBitmap, detectCount, frameWidth, frameHeight, fps,
                 imageWidth, imageHeight, debugInfo, firstBox, null, null, false, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0f, false);
     }
 
     // Full constructor with overlay data and timing breakdown
@@ -76,6 +80,7 @@ public class AnalyseResult {
                          ArrayList<Recognition> recognitions, Matrix frameToPreviewTransform,
                          boolean isFrontCamera, int offsetX, int offsetY, int renderWidth, int renderHeight,
                          int letterboxSize,
+                         float motionScore, boolean isSkippedFrame,
                          long timeToBitmapMs, long timeRotateMs, long timeLetterboxMs,
                          long timePreprocessMs, long timeInferenceMs, long timeDecodeMs,
                          long timeNmsMs, long timeLabelMs, long timeMapMs, long timeOverlayMs) {
@@ -98,6 +103,8 @@ public class AnalyseResult {
         this.renderWidth = renderWidth;
         this.renderHeight = renderHeight;
         this.letterboxSize = letterboxSize;
+        this.motionScore = motionScore;
+        this.isSkippedFrame = isSkippedFrame;
         this.timeToBitmapMs = timeToBitmapMs;
         this.timeRotateMs = timeRotateMs;
         this.timeLetterboxMs = timeLetterboxMs;

@@ -14,6 +14,8 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
 import com.crowdhuman.detector.detector.Yolov5TFLiteDetector;
+import com.crowdhuman.detector.detector.MotionDetector;
+import com.crowdhuman.detector.detector.MotionTracker;
 import com.crowdhuman.detector.utils.ImageProcess;
 import com.crowdhuman.detector.utils.Recognition;
 
@@ -44,6 +46,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
     // Pre-allocated Bitmap for letterbox (avoid per-frame allocation)
     private Bitmap reusedLetterboxBitmap;
 
+    // 运动检测和跟踪
+    private final MotionDetector motionDetector = new MotionDetector();
+    private final MotionTracker motionTracker = new MotionTracker();
+
     public FullImageAnalyse(Context context, PreviewView previewView, int rotation,
                            Yolov5TFLiteDetector detector, boolean isFrontCamera) {
         this.previewView = previewView;
@@ -73,6 +79,8 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             currentDisposable.dispose();
             currentDisposable = null;
         }
+        motionDetector.reset();
+        motionTracker.reset();
         if (reusedLetterboxBitmap != null) {
             reusedLetterboxBitmap.recycle();
             reusedLetterboxBitmap = null;
@@ -119,6 +127,12 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
+                // === Stage 1.5: 运动检测（帧差法） ===
+                long tMotionStart = System.currentTimeMillis();
+                float motionScore = motionDetector.computeMotionScore(cameraBitmap);
+                boolean hasMotion = motionDetector.isMotionDetected();
+                long timeMotionMs = System.currentTimeMillis() - tMotionStart;
+
                 // === Stage 2+3: Combined rotate + letterbox in ONE drawBitmap ===
                 // Instead of: camera -> rotateBitmap -> letterboxBitmap (2 draws)
                 // We do: camera -> letterboxBitmap (1 draw with combined matrix)
@@ -157,18 +171,45 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 long timeRotateMs = 0;
                 long timeLetterboxMs = timeRotateLetterboxMs;
 
-                // === Stage 4: Detect (preprocess + inference + decode + NMS + label) ===
+                // === Stage 4: 条件推理（运动检测+跟踪） ===
                 if (enabledLabels != null) {
                     detector.setEnabledLabels(enabledLabels);
                 }
 
-                long[] detectTimings = new long[6];
-                ArrayList<Recognition> recognitions = detector.detectZeroCopyWithTimings(reusedLetterboxBitmap, detectTimings);
-                long timePreprocessMs = detectTimings[0];
-                long timeInferenceMs = detectTimings[1];
-                long timeDecodeMs = detectTimings[2];
-                long timeNmsMs = detectTimings[3];
-                long timeLabelMs = detectTimings[4];
+                ArrayList<Recognition> recognitions;
+                long timePreprocessMs, timeInferenceMs, timeDecodeMs, timeNmsMs, timeLabelMs;
+                boolean wasSkipped = false;
+
+                if (!hasMotion && motionTracker.getTrackCount() == 0) {
+                    // 无运动且无跟踪对象 → 跳过YOLO推理
+                    recognitions = new ArrayList<>();
+                    timePreprocessMs = 0;
+                    timeInferenceMs = 0;
+                    timeDecodeMs = 0;
+                    timeNmsMs = 0;
+                    timeLabelMs = 0;
+                    wasSkipped = true;
+                } else if (!hasMotion && motionTracker.getTrackCount() > 0) {
+                    // 无运动但有跟踪对象 → 使用跟踪器预测位置
+                    recognitions = motionTracker.predict();
+                    timePreprocessMs = 0;
+                    timeInferenceMs = 0;
+                    timeDecodeMs = 0;
+                    timeNmsMs = 0;
+                    timeLabelMs = 0;
+                    wasSkipped = true;
+                } else {
+                    // 有运动 → 运行YOLO推理
+                    long[] detectTimings = new long[6];
+                    recognitions = detector.detectZeroCopyWithTimings(reusedLetterboxBitmap, detectTimings);
+                    timePreprocessMs = detectTimings[0];
+                    timeInferenceMs = detectTimings[1];
+                    timeDecodeMs = detectTimings[2];
+                    timeNmsMs = detectTimings[3];
+                    timeLabelMs = detectTimings[4];
+                    // 更新跟踪器（注意：此时坐标仍在模型空间，但跟踪器只关心相对位置）
+                    motionTracker.update(recognitions);
+                }
                 t3 = System.currentTimeMillis();
 
                 // === Stage 5: Map coordinates ===
@@ -233,15 +274,13 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                 // Debug info with full pipeline dimensions
                 String debugInfo = String.format(
-                        "cam=%dx%d model=%d scale=%.3f pad=%d,%d preview=%dx%d render=%dx%d offset=%d,%d",
-                        imgW, imgH, modelSize,
-                        scale, padX, padY, previewWidth, previewHeight,
-                        renderW, renderH, offsetX, offsetY);
+                        "cam=%dx%d model=%d motion=%.4f skip=%b tracks=%d",
+                        imgW, imgH, modelSize, motionScore, wasSkipped, motionTracker.getTrackCount());
                 Log.d("FullImageAnalyse", debugInfo);
 
                 Log.i("PipelineTiming", String.format(
-                        "toBitmap=%dms rotate+letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
-                        timeToBitmapMs, timeRotateLetterboxMs,
+                        "toBitmap=%dms motion=%dms rotate+letterbox=%dms preprocess=%dms inference=%dms decode=%dms nms=%dms label=%dms map=%dms total=%dms",
+                        timeToBitmapMs, timeMotionMs, timeRotateLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
                         timeNmsMs, timeLabelMs, timeMapMs,
                         System.currentTimeMillis() - start));
@@ -262,7 +301,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
                         recognitions, cameraToPreview, isFrontCamera, offsetX, offsetY, renderW, renderH,
-                        modelSize,
+                        modelSize, motionScore, wasSkipped,
                         timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
                         timeNmsMs, timeLabelMs, timeMapMs, timeOverlayMs));
