@@ -34,8 +34,18 @@ public class MotionDetector {
             return 0.0f;
         }
 
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
+        // getPixels() does not support HardwareBitmap; convert to ARGB_8888 if needed
+        Bitmap workBitmap = bitmap;
+        if (bitmap.getConfig() != Bitmap.Config.ARGB_8888) {
+            try {
+                workBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            } catch (Exception e) {
+                return lastMotionScore;
+            }
+        }
+
+        int width = workBitmap.getWidth();
+        int height = workBitmap.getHeight();
         int downW = width / DOWNSAMPLE;
         int downH = height / DOWNSAMPLE;
         int totalPixels = downW * downH;
@@ -50,7 +60,7 @@ public class MotionDetector {
         }
 
         // 降采样并转灰度
-        extractDownsampledGray(bitmap, currentGrayPixels, downW, downH);
+        extractDownsampledGray(workBitmap, currentGrayPixels, downW, downH);
 
         float score = 0.0f;
 
@@ -75,6 +85,12 @@ public class MotionDetector {
         prevHeight = downH;
 
         lastMotionScore = score;
+
+        // 回收复制的 bitmap（如果是 HardwareBitmap 转换的）
+        if (workBitmap != bitmap) {
+            workBitmap.recycle();
+        }
+
         return score;
     }
 
