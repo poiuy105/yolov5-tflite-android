@@ -79,8 +79,6 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
             currentDisposable.dispose();
             currentDisposable = null;
         }
-        motionDetector.reset();
-        motionTracker.reset();
         if (reusedLetterboxBitmap != null) {
             reusedLetterboxBitmap.recycle();
             reusedLetterboxBitmap = null;
