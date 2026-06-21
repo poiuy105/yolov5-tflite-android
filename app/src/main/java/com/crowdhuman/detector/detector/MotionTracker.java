@@ -245,6 +245,13 @@ public class MotionTracker {
     }
 
     /**
+     * 获取当前跟踪对象数量。
+     */
+    public int getTrackCount() {
+        return trackedObjects.size();
+    }
+
+    /**
      * 重置跟踪器，清除所有轨迹。
      */
     public void reset() {
