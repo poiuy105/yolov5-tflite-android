@@ -121,9 +121,32 @@ public class Yolov5TFLiteDetector {
             inputSize = new Size(inputShape[2], inputShape[1]); // [1, H, W, 3]
 
             int outputIdx = tflite.getOutputTensorCount() - 1; // last output
-            int[] outputShape = tflite.getOutputTensor(outputIdx).shape();
-            outputSize = outputShape;
-            Log.i("tfliteSupport", "Model input: " + inputSize + ", output: " + java.util.Arrays.toString(outputSize));
+            int[] rawOutputShape = tflite.getOutputTensor(outputIdx).shape();
+            Log.i("tfliteSupport", "Model input: " + inputSize + ", raw output: " + java.util.Arrays.toString(rawOutputShape));
+
+            // YOLOv5 (anchor-based): output [1, 6300, 85] -> [numDetections, stride]
+            // YOLOv8 (ultralytics TFLite): output [1, 84, 525] -> [stride, numDetections] (transposed!)
+            // Auto-detect and normalize to [numDetections, stride] format
+            if (rawOutputShape.length == 3) {
+                int dim1 = rawOutputShape[1];
+                int dim2 = rawOutputShape[2];
+                // If dim1 looks like stride (84=4+80 classes) and dim2 > dim1, it's transposed
+                int expectedStride = currentConfig.numClasses + 4; // YOLOv8: 84
+                int expectedStrideV5 = currentConfig.numClasses + 5; // YOLOv5: 85
+                if (dim1 == expectedStride || dim1 == expectedStrideV5) {
+                    // Transposed format: [1, stride, numDetections] -> normalize to [1, numDetections, stride]
+                    outputSize = new int[]{1, dim2, dim1};
+                    isOutputTransposed = true;
+                    Log.i("tfliteSupport", "Detected transposed output, normalized to: " + java.util.Arrays.toString(outputSize));
+                } else {
+                    // Normal format: [1, numDetections, stride]
+                    outputSize = rawOutputShape;
+                    isOutputTransposed = false;
+                }
+            } else {
+                outputSize = rawOutputShape;
+                isOutputTransposed = false;
+            }
 
             // Load labels
             associatedAxisLabels = FileUtil.loadLabels(context, currentConfig.labelFile);
@@ -214,10 +237,16 @@ public class Yolov5TFLiteDetector {
      * reducing iterations from 6300 to typically 50-200 on most frames.
      */
     private boolean isAnchorBased = true; // true = YOLOv5, false = YOLOv8
+    private boolean isOutputTransposed = false; // true = ultralytics TFLite [1,84,525] format
 
     private ArrayList<Recognition> decodeOutput(float[] data) {
         ArrayList<Recognition> results = new ArrayList<>();
         if (data == null || data.length == 0) return results;
+
+        // If output is transposed [1, stride, numDetections], transpose to [1, numDetections, stride]
+        if (isOutputTransposed) {
+            data = transposeOutput(data, outputSize[2], outputSize[1]); // [stride, numDetections] -> [numDetections, stride]
+        }
 
         float threshold = nmsProcessor.getDetectThreshold();
         int stride = outputSize[2];
@@ -276,6 +305,21 @@ public class Yolov5TFLiteDetector {
                     new RectF(xmin, ymin, xmax, ymax)));
         }
         return results;
+    }
+
+    /**
+     * Transpose 2D output data from [rows, cols] to [cols, rows].
+     * Used to convert ultralytics TFLite transposed format [stride, numDetections]
+     * to standard format [numDetections, stride].
+     */
+    private float[] transposeOutput(float[] data, int rows, int cols) {
+        float[] transposed = new float[data.length];
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                transposed[c * rows + r] = data[r * cols + c];
+            }
+        }
+        return transposed;
     }
 
     private void assignLabels(ArrayList<Recognition> recognitions) {
