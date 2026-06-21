@@ -59,6 +59,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView detectCountTextView;
     private TextView fpsTextView;
     private TextView timingTextView;
+    private com.google.android.material.button.MaterialButton timingToggle;
+    private boolean showTimingDetail = true;
     private TextView thresholdTextView;
     private SeekBar thresholdSeekBar;
     private ImageView cameraSwitchButton;
@@ -133,6 +135,7 @@ public class MainActivity extends AppCompatActivity {
         detectCountTextView = findViewById(R.id.detect_count);
         fpsTextView = findViewById(R.id.fps_text);
         timingTextView = findViewById(R.id.timing_text);
+        timingToggle = findViewById(R.id.timing_toggle);
         thresholdTextView = findViewById(R.id.threshold_value);
         thresholdSeekBar = findViewById(R.id.threshold_seekbar);
         cameraSwitchButton = findViewById(R.id.camera_switch);
@@ -166,6 +169,10 @@ public class MainActivity extends AppCompatActivity {
         });
 
         screenshotButton.setOnClickListener(v -> takeScreenshot());
+        timingToggle.setOnClickListener(v -> {
+            showTimingDetail = !showTimingDetail;
+            timingToggle.setText(showTimingDetail ? "Hide" : "Detail");
+        });
         galleryButton.setOnClickListener(v -> Toast.makeText(this, "Gallery detection coming soon", Toast.LENGTH_SHORT).show());
 
         rotateButton.setOnClickListener(v -> {
@@ -265,26 +272,33 @@ public class MainActivity extends AppCompatActivity {
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
 
-                // Per-stage timing + pixel info breakdown
-                String timingStr = String.format(
-                        "[1]Camera\u2192Bitmap: %dx%d %dms\n" +
-                        "[M]Motion: %.4f %s\n" +
-                        "[2]Rotate+Letterbox: %dx%d\u2192%dx%d %dms\n" +
-                        "[3]Preprocess\u2192%dx%d %dms\n" +
-                        "[4]Inference %dms\n" +
-                        "[5]Decode %dms\n" +
-                        "[6]NMS %dms\n" +
-                        "[7]Map\u2192PreviewView: %dx%d %dms\n" +
-                        "Total: %dms",
-                        result.imageWidth, result.imageHeight, result.timeToBitmapMs,
-                        result.motionScore, result.isSkippedFrame ? "SKIP" : "RUN",
-                        result.imageHeight, result.imageWidth, result.letterboxSize, result.letterboxSize, result.timeLetterboxMs,
-                        result.letterboxSize, result.letterboxSize, result.timePreprocessMs,
-                        result.timeInferenceMs,
-                        result.timeDecodeMs,
-                        result.timeNmsMs,
-                        result.frameWidth, result.frameHeight, result.timeMapMs,
-                        result.costTimeMs);
+                // Per-stage timing breakdown
+                String timingStr;
+                if (showTimingDetail) {
+                    timingStr = String.format(
+                            "[1]Camera\u2192Bitmap: %dx%d %dms\n" +
+                            "[2]Rotate+Letterbox\u2192%dx%d %dms\n" +
+                            "[3]Preprocess\u2192%dx%d %dms\n" +
+                            "[4]Inference %dms\n" +
+                            "[5]Decode %dms\n" +
+                            "[6]NMS %dms\n" +
+                            "[7]Map\u2192Preview %dx%d %dms\n" +
+                            "[M]Motion: %.4f %s\n" +
+                            "Total: %dms",
+                            result.imageWidth, result.imageHeight, result.timeToBitmapMs,
+                            result.letterboxSize, result.letterboxSize, result.timeLetterboxMs,
+                            result.letterboxSize, result.letterboxSize, result.timePreprocessMs,
+                            result.timeInferenceMs,
+                            result.timeDecodeMs,
+                            result.timeNmsMs,
+                            result.frameWidth, result.frameHeight, result.timeMapMs,
+                            result.motionScore, result.isSkippedFrame ? "SKIP" : "RUN",
+                            result.costTimeMs);
+                } else {
+                    timingStr = String.format("Total: %dms | FPS: %.1f | %s",
+                            result.costTimeMs, result.fps,
+                            result.isSkippedFrame ? "SKIP" : "RUN");
+                }
                 timingTextView.setText(timingStr);
 
                 Log.d("MainActivity", "Debug: " + result.debugInfo);
