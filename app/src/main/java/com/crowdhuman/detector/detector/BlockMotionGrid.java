@@ -36,6 +36,8 @@ public class BlockMotionGrid {
     private int mergeDistance = 32;
     /** 覆盖率回退阈值（0-1） */
     private float coverageFallback = 0.6f;
+    /** 形态学膨胀半径（块数，0=不膨胀） */
+    private int dilationRadius = 1;
 
     // === 内部状态 ===
     private final int downsample;
@@ -116,22 +118,50 @@ public class BlockMotionGrid {
             }
         }
 
-        // 3. 计算覆盖率
+        // 3. 形态学膨胀：填补纯色衣服等造成的空洞，减少碎片化
+        if (dilationRadius > 0 && activeBlockCount > 0) {
+            boolean[] dilated = new boolean[totalBlocks];
+            System.arraycopy(active, 0, dilated, 0, totalBlocks);
+            for (int r = 1; r <= dilationRadius; r++) {
+                boolean[] next = new boolean[totalBlocks];
+                System.arraycopy(dilated, 0, next, 0, totalBlocks);
+                for (int row = 0; row < gridRows; row++) {
+                    for (int col = 0; col < gridCols; col++) {
+                        if (dilated[row * gridCols + col]) {
+                            // 向4方向扩展1格
+                            if (row > 0) next[(row - 1) * gridCols + col] = true;
+                            if (row < gridRows - 1) next[(row + 1) * gridCols + col] = true;
+                            if (col > 0) next[row * gridCols + (col - 1)] = true;
+                            if (col < gridCols - 1) next[row * gridCols + (col + 1)] = true;
+                        }
+                    }
+                }
+                dilated = next;
+            }
+            active = dilated;
+            // 重新计算活跃块数
+            activeBlockCount = 0;
+            for (int i = 0; i < totalBlocks; i++) {
+                if (active[i]) activeBlockCount++;
+            }
+        }
+
+        // 4. 计算覆盖率
         float coverageRatio = (float) activeBlockCount / totalBlocks;
 
-        // 4. 覆盖率过高 → 回退全帧
+        // 5. 覆盖率过高 → 回退全帧
         if (coverageRatio > coverageFallback) {
             Log.d(TAG, "Coverage " + String.format("%.1f%%", coverageRatio * 100)
                     + " exceeds threshold, fallback to full frame");
             return new ExtractionResult(new ArrayList<>(), true, coverageRatio);
         }
 
-        // 5. 无活跃块 → 空结果
+        // 6. 无活跃块 → 空结果
         if (activeBlockCount == 0) {
             return new ExtractionResult(new ArrayList<>(), false, coverageRatio);
         }
 
-        // 6. BFS 连通域分析
+        // 7. BFS 连通域分析
         boolean[] visited = new boolean[totalBlocks];
         ArrayList<Rect> components = new ArrayList<>();
 
@@ -184,15 +214,15 @@ public class BlockMotionGrid {
             }
         }
 
-        // 7. 合并近距离区域
+        // 8. 合并近距离区域
         components = mergeNearbyRegions(components);
 
-        // 8. 如果区域过多，合并最近的直到满足 maxRegions
+        // 9. 如果区域过多，合并最近的直到满足 maxRegions
         while (components.size() > maxRegions) {
             mergeClosestPair(components);
         }
 
-        // 9. 对每个区域：方形化 + padding + min/max 约束 + 帧边界裁剪
+        // 10. 对每个区域：方形化 + padding + min/max 约束 + 帧边界裁剪
         ArrayList<Rect> finalRegions = new ArrayList<>();
         long totalCropArea = 0;
 
@@ -207,7 +237,7 @@ public class BlockMotionGrid {
             totalCropArea += (long) square.width() * square.height();
         }
 
-        // 10. 最终覆盖率检查（包括 padding 扩展后的面积）
+        // 11. 最终覆盖率检查（包括 padding 扩展后的面积）
         float finalCoverage = (float) totalCropArea / ((long) frameW * frameH);
         if (finalCoverage > coverageFallback) {
             Log.d(TAG, "Final coverage " + String.format("%.1f%%", finalCoverage * 100)
@@ -375,7 +405,23 @@ public class BlockMotionGrid {
         this.mergeDistance = distance;
     }
 
+    public int getMergeDistance() {
+        return mergeDistance;
+    }
+
     public void setCoverageFallback(float ratio) {
         this.coverageFallback = ratio;
+    }
+
+    public void setDilationRadius(int radius) {
+        this.dilationRadius = Math.max(0, radius);
+    }
+
+    public int getDilationRadius() {
+        return dilationRadius;
+    }
+
+    public int getBlockActivateThreshold() {
+        return blockActivateThreshold;
     }
 }

@@ -65,6 +65,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean showTimingDetail = false;
     private TextView thresholdTextView;
     private SeekBar thresholdSeekBar;
+    private SeekBar motionSensSeekBar;
+    private TextView motionSensValueText;
+    private SeekBar mergeDistSeekBar;
+    private TextView mergeDistValueText;
     private ImageView cameraSwitchButton;
     private ImageView screenshotButton;
     private ImageView galleryButton;
@@ -141,6 +145,10 @@ public class MainActivity extends AppCompatActivity {
         timingToggle = findViewById(R.id.timing_toggle);
         thresholdTextView = findViewById(R.id.threshold_value);
         thresholdSeekBar = findViewById(R.id.threshold_seekbar);
+        motionSensSeekBar = findViewById(R.id.motion_sens_seekbar);
+        motionSensValueText = findViewById(R.id.motion_sens_value);
+        mergeDistSeekBar = findViewById(R.id.merge_dist_seekbar);
+        mergeDistValueText = findViewById(R.id.merge_dist_value);
         cameraSwitchButton = findViewById(R.id.camera_switch);
         screenshotButton = findViewById(R.id.screenshot);
         galleryButton = findViewById(R.id.gallery);
@@ -208,11 +216,41 @@ public class MainActivity extends AppCompatActivity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float threshold = progress / 100.0f;
                 thresholdTextView.setText(String.format("Threshold: %.2f", threshold));
-                // Sync threshold to BOTH detectors (320 full-frame + 160 motion-region)
+                // Sync threshold to ALL NMS processors (320 + 160 + cross-region)
                 if (Math.abs(threshold - lastThreshold) > 0.001f) {
                     if (detector != null) detector.setDetectThreshold(threshold);
                     if (detectorSmall != null) detectorSmall.setDetectThreshold(threshold);
+                    if (currentAnalyser != null) currentAnalyser.setCrossRegionThreshold(threshold);
                     lastThreshold = threshold;
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        // Motion sensitivity: progress [0..10] → blockActivateThreshold [12..2]
+        // Lower threshold = more blocks activated = more sensitive
+        motionSensSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int threshold = 12 - progress;  // progress 0→12, 10→2
+                motionSensValueText.setText(String.valueOf(threshold));
+                if (currentAnalyser != null) {
+                    currentAnalyser.getBlockMotionGrid().setBlockActivateThreshold(threshold);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        // Merge distance: progress [0..8] → distance [16..144] pixels
+        mergeDistSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int distance = 16 + progress * 16;  // 16, 32, 48, ..., 144
+                mergeDistValueText.setText(distance + "px");
+                if (currentAnalyser != null) {
+                    currentAnalyser.getBlockMotionGrid().setMergeDistance(distance);
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}

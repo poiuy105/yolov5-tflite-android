@@ -82,6 +82,18 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
         this.enabledLabels = labels;
     }
 
+    /**
+     * 同步检测阈值到跨区域 NMS 处理器。
+     * 由 UI SeekBar 调用，确保 crossRegionNms 的置信度过滤与主检测器一致。
+     */
+    public void setCrossRegionThreshold(float threshold) {
+        crossRegionNms.setDetectThreshold(threshold);
+    }
+
+    public BlockMotionGrid getBlockMotionGrid() {
+        return blockMotionGrid;
+    }
+
     private void ensureLetterboxBitmap(int size) {
         if (reusedLetterboxBitmap == null || reusedLetterboxBitmap.getWidth() != size) {
             if (reusedLetterboxBitmap != null) reusedLetterboxBitmap.recycle();
