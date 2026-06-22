@@ -245,20 +245,21 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     long totalNms = 0, totalLabel = 0;
 
                     for (Rect cropRect : motionRegions) {
-                        // 1. 裁剪 + 旋转 + letterbox → smallSize x smallSize
+                        // 1. 裁剪 + 缩放 + letterbox → smallSize x smallSize
+                        // 注意：区域裁剪不需要旋转！cropRect 已经是原始帧坐标，
+                        // 只需平移到画布左上角再缩放即可。
                         int cropW = cropRect.width();
                         int cropH = cropRect.height();
                         float cropScale = Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
-                        int scaledW = (int) (cropH * cropScale);  // 旋转后 cropH 变宽
-                        int scaledH = (int) (cropW * cropScale);  // 旋转后 cropW 变高
+                        int scaledW = (int) (cropW * cropScale);
+                        int scaledH = (int) (cropH * cropScale);
                         int padX = (smallSize - scaledW) / 2;
                         int padY = (smallSize - scaledH) / 2;
 
                         Matrix cropMatrix = new Matrix();
-                        cropMatrix.postTranslate(-cropRect.left - cropW / 2f, -cropRect.top - cropH / 2f);
-                        cropMatrix.postRotate(90);
+                        cropMatrix.postTranslate(-cropRect.left, -cropRect.top);
                         cropMatrix.postScale(cropScale, cropScale);
-                        cropMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
+                        cropMatrix.postTranslate(padX, padY);
 
                         cropCanvas.drawColor(Color.GRAY);
                         cropCanvas.drawBitmap(cameraBitmap, cropMatrix, smoothPaint);
