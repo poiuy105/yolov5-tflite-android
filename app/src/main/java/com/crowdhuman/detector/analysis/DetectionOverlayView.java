@@ -25,9 +25,12 @@ public class DetectionOverlayView extends View {
     private final Paint textBgPaint = new Paint();
     private final Paint textPaint = new Paint();
     private final Paint fpsPaint = new Paint();
+    private final Paint motionRegionPaint = new Paint();
+    private final Paint motionRegionBorderPaint = new Paint();
     private final float textScale;
 
     private ArrayList<Recognition> recognitions = new ArrayList<>();
+    private ArrayList<RectF> motionRegionRects = null;
     private boolean isFrontCamera = false;
     private float fps = 0;
     private int offsetX = 0, offsetY = 0;
@@ -72,6 +75,15 @@ public class DetectionOverlayView extends View {
         fpsPaint.setColor(Color.YELLOW);
         fpsPaint.setStyle(Paint.Style.FILL);
         fpsPaint.setTypeface(Typeface.DEFAULT_BOLD);
+
+        // 运动区域可视化：半透明绿色填充 + 绿色虚线边框
+        motionRegionPaint.setStyle(Paint.Style.FILL);
+        motionRegionPaint.setColor(Color.argb(40, 0, 255, 100));
+        motionRegionBorderPaint.setStyle(Paint.Style.STROKE);
+        motionRegionBorderPaint.setStrokeWidth(2 * textScale);
+        motionRegionBorderPaint.setColor(Color.argb(180, 0, 255, 100));
+        motionRegionBorderPaint.setPathEffect(new android.graphics.DashPathEffect(
+                new float[]{8 * textScale, 4 * textScale}, 0));
     }
 
     /**
@@ -98,12 +110,28 @@ public class DetectionOverlayView extends View {
     public void clearResults() {
         this.recognitions.clear();
         this.fps = 0;
+        this.motionRegionRects = null;
         postInvalidate();
+    }
+
+    /**
+     * 设置运动区域矩形（预览空间），供可视化绘制。
+     */
+    public void setMotionRegionRects(ArrayList<RectF> rects) {
+        this.motionRegionRects = rects;
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+
+        // 绘制运动区域（半透明绿色矩形，在检测框下方）
+        if (motionRegionRects != null && !motionRegionRects.isEmpty()) {
+            for (RectF region : motionRegionRects) {
+                canvas.drawRect(region, motionRegionPaint);
+                canvas.drawRect(region, motionRegionBorderPaint);
+            }
+        }
 
         if (recognitions.isEmpty() && fps <= 0) return;
 

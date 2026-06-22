@@ -391,7 +391,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                     RectF firstBox = recognitions.isEmpty() ? null : new RectF(recognitions.get(0).getLocation());
 
-                    emitter.onNext(new AnalyseResult(
+                    AnalyseResult fullFrameResult = new AnalyseResult(
                             totalTimeMs, timeInferenceMs, null, recognitions.size(),
                             previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
                             recognitions, pvt.matrix, isFrontCamera, pvt.offsetX, pvt.offsetY, pvt.renderW, pvt.renderH,
@@ -399,7 +399,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                             timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                             timePreprocessMs, timeInferenceMs, timeDecodeMs,
                             timeNmsMs, timeLabelMs, timeMapMs, 0L,
-                            timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel));
+                            timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel);
+                    attachMotionRegions(fullFrameResult, motionRegions, pvt, imgW, isFrontCamera);
+                    emitter.onNext(fullFrameResult);
                     return;  // 提前返回，避免重复处理
                 }
 
@@ -454,7 +456,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         ? detectorSmall.getInputSize().getWidth()
                         : modelSize;
 
-                emitter.onNext(new AnalyseResult(
+                AnalyseResult regionResult = new AnalyseResult(
                         totalTimeMs, timeInferenceMs, null, recognitions.size(),
                         previewWidth, previewHeight, currentFps, imgW, imgH, debugInfo, firstBox,
                         recognitions, pvt.matrix, isFrontCamera, pvt.offsetX, pvt.offsetY, pvt.renderW, pvt.renderH,
@@ -462,7 +464,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         timeToBitmapMs, timeRotateMs, timeLetterboxMs,
                         timePreprocessMs, timeInferenceMs, timeDecodeMs,
                         timeNmsMs, timeLabelMs, timeMapMs, 0L,
-                        timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel));
+                        timeRegionExtractMs, timeCropResizeMs, regionCount, useSmallModel);
+                attachMotionRegions(regionResult, motionRegions, pvt, imgW, isFrontCamera);
+                emitter.onNext(regionResult);
 
             } catch (Exception e) {
                 Log.e("FullImageAnalyse", "Error: " + e.getMessage(), e);
@@ -476,6 +480,29 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                         result -> { if (callback != null) callback.onResult(result); },
                         error -> { Log.e("FullImageAnalyse", "RxJava error: " + error.getMessage(), error); if (callback != null) callback.onError(error.getMessage()); }
                 );
+    }
+
+    /**
+     * 将运动区域从相机坐标变换到预览坐标，并附加到 AnalyseResult。
+     */
+    private void attachMotionRegions(AnalyseResult result, ArrayList<Rect> cameraRegions,
+                                     PreviewTransform pvt, int imgW, boolean isFront) {
+        if (cameraRegions == null || cameraRegions.isEmpty()) return;
+        ArrayList<RectF> previewRegions = new ArrayList<>();
+        for (Rect cr : cameraRegions) {
+            RectF rf = new RectF(cr.left, cr.top, cr.right, cr.bottom);
+            // 前摄镜像
+            if (isFront) {
+                float centerX = imgW / 2f;
+                float left = 2 * centerX - rf.right;
+                float right = 2 * centerX - rf.left;
+                rf.left = left;
+                rf.right = right;
+            }
+            pvt.matrix.mapRect(rf);
+            previewRegions.add(rf);
+        }
+        result.setMotionRegionRects(previewRegions);
     }
 
     /**

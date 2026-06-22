@@ -35,9 +35,21 @@ public class CameraProcess {
     private static final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA"};
     private int currentLensFacing = CameraSelector.LENS_FACING_BACK;
 
-    // Target analysis resolution - 640x480 for better detail while keeping performance
-    private static final int TARGET_ANALYSIS_WIDTH = 640;
-    private static final int TARGET_ANALYSIS_HEIGHT = 480;
+    // Target analysis resolution - configurable via setAnalysisResolution()
+    private int targetAnalysisWidth = 640;
+    private int targetAnalysisHeight = 480;
+
+    /**
+     * 设置分析流分辨率（宽x高，横向）。
+     * 设置后需重启相机生效。
+     */
+    public void setAnalysisResolution(int width, int height) {
+        this.targetAnalysisWidth = width;
+        this.targetAnalysisHeight = height;
+    }
+
+    public int getTargetAnalysisWidth() { return targetAnalysisWidth; }
+    public int getTargetAnalysisHeight() { return targetAnalysisHeight; }
 
     public boolean allPermissionsGranted(Context context) {
         for (String permission : REQUIRED_PERMISSIONS) {
@@ -72,10 +84,10 @@ public class CameraProcess {
                     @Override
                     public List<android.util.Size> filter(List<android.util.Size> supportedSizes, int rotationDegrees) {
                         List<android.util.Size> filtered = new ArrayList<>();
-                        // Only keep resolutions <= 320x240
+                        // Only keep resolutions <= target analysis size
                         for (android.util.Size size : supportedSizes) {
-                            if (size.getWidth() <= TARGET_ANALYSIS_WIDTH
-                                    && size.getHeight() <= TARGET_ANALYSIS_HEIGHT) {
+                            if (size.getWidth() <= targetAnalysisWidth
+                                    && size.getHeight() <= targetAnalysisHeight) {
                                 filtered.add(size);
                             }
                         }
@@ -87,12 +99,12 @@ public class CameraProcess {
                                     min = s;
                                 }
                             }
-                            Log.w("CameraProcess", "No resolution <= " + TARGET_ANALYSIS_WIDTH + "x" + TARGET_ANALYSIS_HEIGHT
+                            Log.w("CameraProcess", "No resolution <= " + targetAnalysisWidth + "x" + targetAnalysisHeight
                                     + ", using smallest: " + min.getWidth() + "x" + min.getHeight());
                             filtered.add(min);
                         } else {
                             Log.i("CameraProcess", "ResolutionFilter: " + filtered.size() + " candidates <= "
-                                    + TARGET_ANALYSIS_WIDTH + "x" + TARGET_ANALYSIS_HEIGHT);
+                                    + targetAnalysisWidth + "x" + targetAnalysisHeight);
                         }
                         return filtered;
                     }

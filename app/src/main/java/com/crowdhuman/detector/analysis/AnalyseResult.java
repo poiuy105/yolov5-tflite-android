@@ -57,6 +57,13 @@ public class AnalyseResult {
     public final int regionCount;          // 本次处理运动区域数量
     public final boolean usedSmallModel;   // 是否使用了 160 小模型
 
+    // 运动区域可视化（预览空间中的矩形，供 overlay 绘制）
+    public ArrayList<RectF> motionRegionRects;
+
+    public void setMotionRegionRects(ArrayList<RectF> rects) {
+        this.motionRegionRects = rects;
+    }
+
     public AnalyseResult(long costTimeMs, Bitmap resultBitmap, int detectCount,
                          int frameWidth, int frameHeight, float fps) {
         this(costTimeMs, 0L, resultBitmap, detectCount, frameWidth, frameHeight, fps, 0, 0, "", (RectF) null,

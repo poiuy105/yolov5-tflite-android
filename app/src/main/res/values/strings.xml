@@ -24,4 +24,12 @@
         <item>yolov5n-320</item>
         <item>yolov5n-160</item>
     </string-array>
+
+    <string-array name="frame_sizes">
+        <item>320x240</item>
+        <item>480x360</item>
+        <item>640x480</item>
+        <item>800x600</item>
+        <item>1280x960</item>
+    </string-array>
 </resources>

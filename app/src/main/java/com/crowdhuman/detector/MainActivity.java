@@ -44,6 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String[] ORIENTATION_LABELS = {"Auto", "Portrait", "Landscape"};
 
     private boolean isSpinnerInitialized = false;
+    private boolean isFrameSpinnerInitialized = false;
     private int orientationMode = ORIENTATION_AUTO;
     private FullImageAnalyse currentAnalyser;
     private Yolov5TFLiteDetector detector;
@@ -56,12 +57,12 @@ public class MainActivity extends AppCompatActivity {
     private DetectionOverlayView boxLabelCanvas;
     private Spinner modelSpinner;
     private TextView inferenceTimeTextView;
-    private TextView frameSizeTextView;
+    private Spinner frameSizeSpinner;
     private TextView detectCountTextView;
     private TextView fpsTextView;
     private TextView timingTextView;
     private com.google.android.material.button.MaterialButton timingToggle;
-    private boolean showTimingDetail = true;
+    private boolean showTimingDetail = false;
     private TextView thresholdTextView;
     private SeekBar thresholdSeekBar;
     private ImageView cameraSwitchButton;
@@ -132,7 +133,8 @@ public class MainActivity extends AppCompatActivity {
         boxLabelCanvas = findViewById(R.id.box_label_canvas);
         modelSpinner = findViewById(R.id.model);
         inferenceTimeTextView = findViewById(R.id.inference_time);
-        frameSizeTextView = findViewById(R.id.frame_size);
+        frameSizeSpinner = findViewById(R.id.frame_size_spinner);
+        frameSizeSpinner.setSelection(2); // Default: 640x480 (index 2)
         detectCountTextView = findViewById(R.id.detect_count);
         fpsTextView = findViewById(R.id.fps_text);
         timingTextView = findViewById(R.id.timing_text);
@@ -157,6 +159,23 @@ public class MainActivity extends AppCompatActivity {
                 if (!isSpinnerInitialized) { isSpinnerInitialized = true; return; }
                 String model = (String) parent.getItemAtPosition(i);
                 initModel(model);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        frameSizeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int i, long id) {
+                if (!isFrameSpinnerInitialized) { isFrameSpinnerInitialized = true; return; }
+                String selected = (String) parent.getItemAtPosition(i);
+                // Parse "WxH" format
+                String[] parts = selected.split("x");
+                if (parts.length == 2) {
+                    int w = Integer.parseInt(parts[0]);
+                    int h = Integer.parseInt(parts[1]);
+                    cameraProcess.setAnalysisResolution(w, h);
+                    startCameraWithCurrentMode();
+                }
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -189,9 +208,10 @@ public class MainActivity extends AppCompatActivity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float threshold = progress / 100.0f;
                 thresholdTextView.setText(String.format("Threshold: %.2f", threshold));
-                // FIX: Use 100.0f for float division, update detector when threshold changes
-                if (detector != null && Math.abs(threshold - lastThreshold) > 0.001f) {
-                    detector.setDetectThreshold(threshold);
+                // Sync threshold to BOTH detectors (320 full-frame + 160 motion-region)
+                if (Math.abs(threshold - lastThreshold) > 0.001f) {
+                    if (detector != null) detector.setDetectThreshold(threshold);
+                    if (detectorSmall != null) detectorSmall.setDetectThreshold(threshold);
                     lastThreshold = threshold;
                 }
             }
@@ -296,8 +316,9 @@ public class MainActivity extends AppCompatActivity {
                             result.offsetY,
                             result.renderWidth,
                             result.renderHeight);
+                    // 运动区域可视化
+                    boxLabelCanvas.setMotionRegionRects(result.motionRegionRects);
                 }
-                frameSizeTextView.setText(result.imageHeight + "x" + result.imageWidth);
                 inferenceTimeTextView.setText(result.costTimeMs + "ms (infer " + result.inferenceTimeMs + "ms)");
                 detectCountTextView.setText(String.valueOf(result.detectCount));
                 fpsTextView.setText(String.format("FPS: %.1f", result.fps));
