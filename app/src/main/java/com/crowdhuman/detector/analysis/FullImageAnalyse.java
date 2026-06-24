@@ -162,6 +162,10 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
+                // image.toBitmap() with RGBA_8888 may already rotate to device natural orientation.
+                // If imgH > imgW (portrait), skip rotation in all downstream transforms.
+                boolean bitmapIsPortrait = imgH > imgW;
+
                 // === Stage 1.5: 运动检测（帧差法 + 掩码输出） ===
                 long tMotionStart = System.currentTimeMillis();
                 float motionScore = motionDetector.computeMotionScore(cameraBitmap);
@@ -245,19 +249,27 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     long totalNms = 0, totalLabel = 0;
 
                     for (Rect cropRect : motionRegions) {
-                        // 1. 裁剪 + 旋转 + 缩放 + letterbox → smallSize x smallSize
-                        // 与全帧路径一致：先以裁剪区域中心旋转90°，再缩放到 smallSize
+                        // 1. 裁剪 + (可选旋转) + 缩放 + letterbox → smallSize x smallSize
+                        // 与全帧路径一致：如果 bitmap 是 landscape 才旋转，portrait 则跳过
                         int cropW = cropRect.width();
                         int cropH = cropRect.height();
-                        float cropScale = Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
-                        int scaledW = (int) (cropH * cropScale);  // 旋转后 cropH 变宽
-                        int scaledH = (int) (cropW * cropScale);  // 旋转后 cropW 变高
+                        float cropScale = bitmapIsPortrait
+                                ? Math.min(smallSize / (float) cropH, smallSize / (float) cropW)
+                                : Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
+                        int scaledW = bitmapIsPortrait
+                                ? (int) (cropW * cropScale)
+                                : (int) (cropH * cropScale);
+                        int scaledH = bitmapIsPortrait
+                                ? (int) (cropH * cropScale)
+                                : (int) (cropW * cropScale);
                         int padX = (smallSize - scaledW) / 2;
                         int padY = (smallSize - scaledH) / 2;
 
                         Matrix cropMatrix = new Matrix();
                         cropMatrix.postTranslate(-cropRect.left - cropW / 2f, -cropRect.top - cropH / 2f);
-                        cropMatrix.postRotate(90);
+                        if (!bitmapIsPortrait) {
+                            cropMatrix.postRotate(90);
+                        }
                         cropMatrix.postScale(cropScale, cropScale);
                         cropMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
 
@@ -321,8 +333,12 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     float scale = Math.min(
                             fullModelSize / (float) imgH,
                             fullModelSize / (float) imgW);
-                    int scaledW = (int) (imgH * scale);
-                    int scaledH = (int) (imgW * scale);
+                    int scaledW = bitmapIsPortrait
+                            ? (int) (imgW * scale)
+                            : (int) (imgH * scale);
+                    int scaledH = bitmapIsPortrait
+                            ? (int) (imgH * scale)
+                            : (int) (imgW * scale);
                     int padX = (fullModelSize - scaledW) / 2;
                     int padY = (fullModelSize - scaledH) / 2;
 
@@ -332,7 +348,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                     Matrix combinedMatrix = new Matrix();
                     combinedMatrix.postTranslate(-imgW / 2f, -imgH / 2f);
-                    combinedMatrix.postRotate(90);
+                    if (!bitmapIsPortrait) {
+                        combinedMatrix.postRotate(90);
+                    }
                     combinedMatrix.postScale(scale, scale);
                     combinedMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
 
@@ -535,15 +553,24 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
      * 与原有管线保持一致：旋转 90° + 缩放 + 居中偏移。
      */
     private PreviewTransform buildCameraToPreview(int imgW, int imgH, int previewW, int previewH) {
-        float previewScale = Math.min(previewW / (float) imgH, previewH / (float) imgW);
-        int renderW = (int) (imgH * previewScale);
-        int renderH = (int) (imgW * previewScale);
+        boolean bitmapIsPortrait = imgH > imgW;
+        float previewScale = bitmapIsPortrait
+                ? Math.min(previewW / (float) imgW, previewH / (float) imgH)
+                : Math.min(previewW / (float) imgH, previewH / (float) imgW);
+        int renderW = bitmapIsPortrait
+                ? (int) (imgW * previewScale)
+                : (int) (imgH * previewScale);
+        int renderH = bitmapIsPortrait
+                ? (int) (imgH * previewScale)
+                : (int) (imgW * previewScale);
         int offsetX = (previewW - renderW) / 2;
         int offsetY = (previewH - renderH) / 2;
 
         Matrix cameraToPreview = new Matrix();
         cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
-        cameraToPreview.postRotate(90);
+        if (!bitmapIsPortrait) {
+            cameraToPreview.postRotate(90);
+        }
         cameraToPreview.postScale(previewScale, previewScale);
         cameraToPreview.postTranslate(offsetX + renderW / 2f, offsetY + renderH / 2f);
 
