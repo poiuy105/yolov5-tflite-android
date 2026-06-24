@@ -162,9 +162,16 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 t1 = System.currentTimeMillis();
                 long timeToBitmapMs = t1 - t0;
 
-                // image.toBitmap() with RGBA_8888 may already rotate to device natural orientation.
-                // If imgH > imgW (portrait), skip rotation in all downstream transforms.
+                // Use CameraX's reported rotation to determine if the image needs rotation.
+                // image.getImageInfo().getRotationDegrees() returns the rotation needed to align
+                // the image with the device's display orientation.
+                int rotationDegrees = image.getImageInfo().getRotationDegrees();
+                boolean needsRotation = rotationDegrees != 0;
                 boolean bitmapIsPortrait = imgH > imgW;
+
+                Log.d("FullImageAnalyse", "Camera frame: " + imgW + "x" + imgH +
+                        " rotation=" + rotationDegrees + " needsRotation=" + needsRotation +
+                        " bitmapIsPortrait=" + bitmapIsPortrait);
 
                 // === Stage 1.5: 运动检测（帧差法 + 掩码输出） ===
                 long tMotionStart = System.currentTimeMillis();
@@ -250,25 +257,24 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                     for (Rect cropRect : motionRegions) {
                         // 1. 裁剪 + (可选旋转) + 缩放 + letterbox → smallSize x smallSize
-                        // 与全帧路径一致：如果 bitmap 是 landscape 才旋转，portrait 则跳过
+                        // Use needsRotation to match CameraX's reported rotation direction.
                         int cropW = cropRect.width();
                         int cropH = cropRect.height();
-                        float cropScale = bitmapIsPortrait
-                                ? Math.min(smallSize / (float) cropH, smallSize / (float) cropW)
-                                : Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
-                        int scaledW = bitmapIsPortrait
-                                ? (int) (cropW * cropScale)
-                                : (int) (cropH * cropScale);
-                        int scaledH = bitmapIsPortrait
+                        float cropScale = Math.min(smallSize / (float) cropH, smallSize / (float) cropW);
+                        int scaledW = needsRotation
                                 ? (int) (cropH * cropScale)
                                 : (int) (cropW * cropScale);
+                        int scaledH = needsRotation
+                                ? (int) (cropW * cropScale)
+                                : (int) (cropH * cropScale);
                         int padX = (smallSize - scaledW) / 2;
                         int padY = (smallSize - scaledH) / 2;
 
                         Matrix cropMatrix = new Matrix();
                         cropMatrix.postTranslate(-cropRect.left - cropW / 2f, -cropRect.top - cropH / 2f);
-                        if (!bitmapIsPortrait) {
-                            cropMatrix.postRotate(90);
+                        if (needsRotation) {
+                            // Rotate counter-clockwise to match PreviewView's rotation direction
+                            cropMatrix.postRotate(-90);
                         }
                         cropMatrix.postScale(cropScale, cropScale);
                         cropMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
@@ -330,15 +336,17 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     int fullModelSize = detector.getInputSize().getWidth();
 
                     // Rotate + letterbox
+                    // Use needsRotation (from image.getRotationDegrees()) instead of bitmapIsPortrait
+                    // to match CameraX's reported rotation.
                     float scale = Math.min(
                             fullModelSize / (float) imgH,
                             fullModelSize / (float) imgW);
-                    int scaledW = bitmapIsPortrait
-                            ? (int) (imgW * scale)
-                            : (int) (imgH * scale);
-                    int scaledH = bitmapIsPortrait
+                    int scaledW = needsRotation
                             ? (int) (imgH * scale)
                             : (int) (imgW * scale);
+                    int scaledH = needsRotation
+                            ? (int) (imgW * scale)
+                            : (int) (imgH * scale);
                     int padX = (fullModelSize - scaledW) / 2;
                     int padY = (fullModelSize - scaledH) / 2;
 
@@ -348,8 +356,9 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
                     Matrix combinedMatrix = new Matrix();
                     combinedMatrix.postTranslate(-imgW / 2f, -imgH / 2f);
-                    if (!bitmapIsPortrait) {
-                        combinedMatrix.postRotate(90);
+                    if (needsRotation) {
+                        // Rotate counter-clockwise to match PreviewView's rotation direction
+                        combinedMatrix.postRotate(-90);
                     }
                     combinedMatrix.postScale(scale, scale);
                     combinedMatrix.postTranslate(padX + scaledW / 2f, padY + scaledH / 2f);
@@ -384,7 +393,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                     long timeLetterboxMs = timeRotateLetterboxMs;
 
                     // === Map to preview ===
-                    PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight);
+                    PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight, needsRotation);
                     for (Recognition r : recognitions) {
                         RectF loc = r.getLocation();
                         if (isFrontCamera) {
@@ -442,7 +451,7 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
                 long timeRotateMs = 0;
                 long timeLetterboxMs = 0;
 
-                PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight);
+                PreviewTransform pvt = buildCameraToPreview(imgW, imgH, previewWidth, previewHeight, needsRotation);
                 for (Recognition r : recognitions) {
                     RectF loc = r.getLocation();
                     // 前摄镜像
@@ -550,29 +559,39 @@ public class FullImageAnalyse implements ImageAnalysis.Analyzer {
 
     /**
      * 构建 camera (landscape) → preview (portrait) 坐标变换矩阵。
-     * 与原有管线保持一致：旋转 90° + 缩放 + 居中偏移。
+     * PreviewView 使用逆时针旋转将 landscape sensor 图像显示为 portrait，
+     * 所以这里也使用逆时针 -90°（即 270°）旋转，与 PreviewView 保持一致。
      */
-    private PreviewTransform buildCameraToPreview(int imgW, int imgH, int previewW, int previewH) {
-        boolean bitmapIsPortrait = imgH > imgW;
-        float previewScale = bitmapIsPortrait
-                ? Math.min(previewW / (float) imgW, previewH / (float) imgH)
-                : Math.min(previewW / (float) imgH, previewH / (float) imgW);
-        int renderW = bitmapIsPortrait
-                ? (int) (imgW * previewScale)
-                : (int) (imgH * previewScale);
-        int renderH = bitmapIsPortrait
+    private PreviewTransform buildCameraToPreview(int imgW, int imgH, int previewW, int previewH, boolean needsRotation) {
+        float previewScale = needsRotation
+                ? Math.min(previewW / (float) imgH, previewH / (float) imgW)
+                : Math.min(previewW / (float) imgW, previewH / (float) imgH);
+        int renderW = needsRotation
                 ? (int) (imgH * previewScale)
                 : (int) (imgW * previewScale);
+        int renderH = needsRotation
+                ? (int) (imgW * previewScale)
+                : (int) (imgH * previewScale);
         int offsetX = (previewW - renderW) / 2;
         int offsetY = (previewH - renderH) / 2;
 
         Matrix cameraToPreview = new Matrix();
         cameraToPreview.postTranslate(-imgW / 2f, -imgH / 2f);
-        if (!bitmapIsPortrait) {
-            cameraToPreview.postRotate(90);
+        if (needsRotation) {
+            // PreviewView rotates counter-clockwise 90° to display landscape sensor as portrait.
+            // Use -90° (270°) to match PreviewView's rotation direction.
+            cameraToPreview.postRotate(-90);
         }
         cameraToPreview.postScale(previewScale, previewScale);
         cameraToPreview.postTranslate(offsetX + renderW / 2f, offsetY + renderH / 2f);
+
+        // Log PreviewView and overlay dimensions for debugging
+        android.view.View overlay = previewView.getRootView().findViewById(
+                com.crowdhuman.detector.R.id.box_label_canvas);
+        Log.d("FullImageAnalyse", "PreviewView=" + previewW + "x" + previewH +
+                " Overlay=" + (overlay != null ? overlay.getWidth() + "x" + overlay.getHeight() : "null") +
+                " render=" + renderW + "x" + renderH + " offset=" + offsetX + "," + offsetY +
+                " scale=" + previewScale + " rotation=" + (needsRotation ? "-90" : "0"));
 
         return new PreviewTransform(cameraToPreview, offsetX, offsetY, renderW, renderH);
     }
